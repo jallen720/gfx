@@ -39,12 +39,6 @@ struct window
     u32 Height;
 };
 
-struct limits
-{
-    u32 DeviceMemorySize;
-    u32 HostMemorySize;
-};
-
 struct vertex
 {
     ctk::vec3<f32> Position;
@@ -78,7 +72,6 @@ struct state
     VkCommandPool GraphicsCommandPool;
     vtk::buffer HostBuffer;
     vtk::buffer DeviceBuffer;
-    vtk::region MVPMatrixRegion;
     vtk::region StagingRegion;
     vtk::region VertexRegion;
     vtk::region IndexRegion;
@@ -88,6 +81,7 @@ struct state
     ctk::sarray<VkCommandBuffer, 4> CommandBuffers;
     vtk::vertex_layout VertexLayout;
     ctk::map<u32> VertexAttributeIndexes;
+    ctk::map<vtk::region> UniformRegions;
 
     // Assets
     ctk::map<mesh_region> MeshRegions;
@@ -145,7 +139,7 @@ InitializeGLFWState(state *State)
 }
 
 static void
-InitializeVulkanState(state *State, limits *Limits)
+InitializeVulkanState(state *State)
 {
     ctk::data Config = ctk::LoadData("assets/vulkan.ctkd");
 
@@ -179,20 +173,22 @@ InitializeVulkanState(state *State, limits *Limits)
     ////////////////////////////////////////////////////////////
     /// Data
     ////////////////////////////////////////////////////////////
+    ctk::data *MemoryData = ctk::At(&Config, "memory");
 
     // Buffers
     vtk::buffer_config HostBufferConfig = {};
-    HostBufferConfig.Size = Limits->HostMemorySize;
+    HostBufferConfig.Size = ctk::U32(MemoryData, "host_size");
     HostBufferConfig.UsageFlags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     HostBufferConfig.MemoryPropertyFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     State->HostBuffer = vtk::CreateBuffer(&State->Device, &HostBufferConfig);
 
     vtk::buffer_config DeviceBufferConfig = {};
-    DeviceBufferConfig.Size = Limits->DeviceMemorySize;
+    DeviceBufferConfig.Size = ctk::U32(MemoryData, "device_size");
     DeviceBufferConfig.UsageFlags = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     DeviceBufferConfig.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     State->DeviceBuffer = vtk::CreateBuffer(&State->Device, &DeviceBufferConfig);
 
+    // Regions
     State->StagingRegion = vtk::AllocateRegion(&State->HostBuffer, KILOBYTE);
 
     ////////////////////////////////////////////////////////////
@@ -278,9 +274,17 @@ InitializeVulkanState(state *State, limits *Limits)
     for(u32 VertexAttributeIndex = 0; VertexAttributeIndex < VertexAttributeCount; ++VertexAttributeIndex)
     {
         ctk::data *VertexAttributeData = ctk::At(VertexLayoutData, VertexAttributeIndex);
-        ctk::Push(&State->VertexAttributeIndexes, ctk::CStr(VertexAttributeData, "name"),
+        ctk::Push(&State->VertexAttributeIndexes, VertexAttributeData->Key.Data,
                   vtk::PushVertexAttribute(&State->VertexLayout, ctk::U32(VertexAttributeData, "element_count")));
     }
+
+    ////////////////////////////////////////////////////////////
+    /// Uniform Regions
+    ////////////////////////////////////////////////////////////
+    ctk::data *UniformRegionData = ctk::At(&Config, "uniform_regions");
+    State->UniformRegions = ctk::CreateMap<vtk::region>(1);
+    ctk::Push(&State->UniformRegions, "mvp_matrixes",
+              vtk::AllocateRegion(&State->HostBuffer, sizeof(glm::mat4) * ctk::U32(UniformRegionData, "mvp_matrixes.max_elements")));
 }
 
 static model
@@ -478,17 +482,6 @@ LoadAssets(state *State)
 ////////////////////////////////////////////////////////////
 /// Interface
 ////////////////////////////////////////////////////////////
-static state *
-Initialize(limits *Limits)
-{
-    auto State = ctk::Alloc<state>();
-    *State = {};
-    InitializeGLFWState(State);
-    InitializeVulkanState(State, Limits);
-    LoadAssets(State);
-    return State;
-}
-
 static b32
 WindowClosed(state *State)
 {

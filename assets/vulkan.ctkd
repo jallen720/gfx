@@ -1,8 +1,17 @@
 debug true
-app_name "GFX Test"
+app_name "gfx renderer"
+memory
+{
+    host_size 2000000
+    device_size 2000000
+}
 vertex_layout
-[
-    { name position element_count 3 }
-    { name normal element_count 3 }
-    { name uv element_count 2 }
-]
+{
+    position { element_count 3 }
+    normal { element_count 3 }
+    uv { element_count 2 }
+}
+uniform_regions
+{
+    mvp_matrixes { max_elements 4096 }
+}
