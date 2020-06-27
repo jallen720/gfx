@@ -1,0 +1,16 @@
+models
+[
+    cube
+    quad
+]
+shaders
+[
+    {
+        name shader.vert
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    {
+        name shader.frag
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
+]

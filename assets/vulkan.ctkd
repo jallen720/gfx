@@ -1,0 +1,8 @@
+debug true
+app_name "GFX Test"
+vertex_layout
+[
+    { name position element_count 3 }
+    { name normal element_count 3 }
+    { name uv element_count 2 }
+]
