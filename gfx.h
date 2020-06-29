@@ -189,7 +189,7 @@ InitializeVulkanState(state *State)
     State->DeviceBuffer = vtk::CreateBuffer(&State->Device, &DeviceBufferConfig);
 
     // Regions
-    State->StagingRegion = vtk::AllocateRegion(&State->HostBuffer, KILOBYTE);
+    State->StagingRegion = vtk::AllocateRegion(&State->HostBuffer, 1, KILOBYTE);
 
     ////////////////////////////////////////////////////////////
     /// Depth Image
@@ -284,7 +284,7 @@ InitializeVulkanState(state *State)
     ctk::data *UniformRegionData = ctk::At(&Config, "uniform_regions");
     State->UniformRegions = ctk::CreateMap<vtk::region>(1);
     ctk::Push(&State->UniformRegions, "mvp_matrixes",
-              vtk::AllocateRegion(&State->HostBuffer, sizeof(glm::mat4) * ctk::U32(UniformRegionData, "mvp_matrixes.max_elements")));
+              vtk::AllocateRegion(&State->HostBuffer, ctk::U32(UniformRegionData, "mvp_matrixes.max_elements"), sizeof(glm::mat4)));
 }
 
 static model
@@ -390,8 +390,8 @@ LoadModels(state *State, ctk::data *AssetData)
     }
 
     // Allocate regions in device buffer for storing vertex and index data.
-    State->VertexRegion = vtk::AllocateRegion(&State->DeviceBuffer, TotalVertexCount * sizeof(vertex));
-    State->IndexRegion = vtk::AllocateRegion(&State->DeviceBuffer, TotalIndexCount * sizeof(u32));
+    State->VertexRegion = vtk::AllocateRegion(&State->DeviceBuffer, TotalVertexCount, sizeof(vertex));
+    State->IndexRegion = vtk::AllocateRegion(&State->DeviceBuffer, TotalIndexCount, sizeof(u32));
 
     // Generate references to vertex and index data for each model for rendering.
     State->MeshRegions = ctk::CreateMap<mesh_region>(ModelCount);
