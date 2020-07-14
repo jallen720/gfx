@@ -19,6 +19,29 @@ shader_modules
         stage VK_SHADER_STAGE_FRAGMENT_BIT
     }
 }
+graphics_pipelines
+{
+    default
+    {
+        primitive_topology VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+        depth_testing VK_TRUE
+        shader_modules
+        [
+            unlit_color_vert
+            unlit_color_frag
+        ]
+        descriptor_set_layouts
+        [
+            entity
+            grass_texture
+        ]
+        vertex_inputs
+        [
+            { location 0 binding 0 attribute position }
+            { location 1 binding 0 attribute uv }
+        ]
+    }
+}
 # descriptor_sets
 # {
 #     mvp_matrixes
