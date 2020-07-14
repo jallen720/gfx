@@ -1,17 +1,43 @@
 debug true
 app_name "gfx renderer"
-memory
-{
-    host_size 2000000
-    device_size 2000000
-}
 vertex_layout
 {
     position { element_count 3 }
-    normal { element_count 3 }
+    # normal { element_count 3 }
     uv { element_count 2 }
 }
-uniform_regions
+shader_modules
 {
-    mvp_matrixes { max_elements 4096 }
+    unlit_color_vert
+    {
+        path assets/shaders/shader.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    unlit_color_frag
+    {
+        path assets/shaders/shader.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
 }
+# descriptor_sets
+# {
+#     mvp_matrixes
+#     [
+#         {
+#             type VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
+#             shader_stages [ VK_SHADER_STAGE_VERTEX_BIT ]
+#             count 1
+#             uniform_region mvp_matrixes
+#         }
+#     ]
+# }
+# graphics_pipelines
+# {
+#     unlit
+#     {
+#         descriptor_sets
+#         [
+#             mvp_matrixes
+#         ]
+#     }
+# }
