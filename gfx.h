@@ -86,18 +86,22 @@ struct graphics_state
     ctk::sarray<VkFramebuffer, 4> Framebuffers;
     ctk::sarray<VkCommandBuffer, 4> CommandBuffers;
     vtk::vertex_layout VertexLayout;
-    ctk::smap<vtk::descriptor_set, 4> DescriptorSets;
     vtk::buffer HostBuffer;
     vtk::buffer DeviceBuffer;
     vtk::region StagingRegion;
     vtk::uniform_buffer EntityUniformBuffer;
-    vtk::texture GrassTexture;
-    vtk::texture DirtTexture;
 
     // Vulkan State
-    ctk::smap<u32, 4> VertexAttributeIndexes;
+    VkDescriptorPool DescriptorPool;
+    ctk::smap<vtk::texture, 4> Textures;
     ctk::smap<vtk::shader_module, 16> ShaderModules;
+    ctk::smap<vtk::uniform_buffer, 4> UniformBuffers;
+    ctk::smap<vtk::descriptor_set, 4> DescriptorSets;
+    ctk::smap<u32, 4> VertexAttributeIndexes;
     ctk::smap<vtk::graphics_pipeline, 4> GraphicsPipelines;
+
+    // Assets
+    ctk::smap<
 };
 
 struct vertex
@@ -326,9 +330,6 @@ InitVulkan(graphics_state *GraphicsState, window *Window, ctk::data *VulkanData)
     vtk::buffer *HostBuffer = &GraphicsState->HostBuffer;
     vtk::buffer *DeviceBuffer = &GraphicsState->DeviceBuffer;
     vtk::region *StagingRegion = &GraphicsState->StagingRegion;
-    vtk::uniform_buffer *EntityUniformBuffer = &GraphicsState->EntityUniformBuffer;
-    vtk::texture *GrassTexture = &GraphicsState->GrassTexture;
-    vtk::texture *DirtTexture = &GraphicsState->DirtTexture;
 
     // Instance
     u32 GLFWExtensionCount = 0;
@@ -451,70 +452,6 @@ InitVulkan(graphics_state *GraphicsState, window *Window, ctk::data *VulkanData)
 
     // Regions
     *StagingRegion = vtk::AllocateRegion(HostBuffer, 2 * MEGABYTE);
-
-    ////////////////////////////////////////////////////////////
-    /// Descriptor Set Resources
-    ////////////////////////////////////////////////////////////
-
-    // Uniform Buffers
-    *EntityUniformBuffer = vtk::CreateUniformBuffer(HostBuffer, 2, sizeof(entity_ubo), FrameState->Frames.Count);
-
-    // Textures
-    vtk::texture_info GrassTextureInfo = {};
-    GrassTextureInfo.Filter = VK_FILTER_NEAREST;
-    *GrassTexture = vtk::LoadTexture(Device, *GraphicsCommandPool, StagingRegion, "assets/textures/grass.jpg", &GrassTextureInfo);
-
-    vtk::texture_info DirtTextureInfo = {};
-    DirtTextureInfo.Filter = VK_FILTER_NEAREST;
-    *DirtTexture = vtk::LoadTexture(Device, *GraphicsCommandPool, StagingRegion, "assets/textures/dirt.jpg", &DirtTextureInfo);
-
-    ////////////////////////////////////////////////////////////
-    /// Descriptor Sets
-    ////////////////////////////////////////////////////////////
-
-    // Descriptor Infos
-    vtk::descriptor_info EntityDescriptorInfo = {};
-    EntityDescriptorInfo.Type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    EntityDescriptorInfo.ShaderStageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    EntityDescriptorInfo.Count = 1;
-    EntityDescriptorInfo.UniformBuffer = EntityUniformBuffer;
-
-    vtk::descriptor_info GrassTextureDescriptorInfo = {};
-    GrassTextureDescriptorInfo.Type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    GrassTextureDescriptorInfo.ShaderStageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    GrassTextureDescriptorInfo.Count = 1;
-    GrassTextureDescriptorInfo.Texture = GrassTexture;
-
-    vtk::descriptor_info DirtTextureDescriptorInfo = {};
-    DirtTextureDescriptorInfo.Type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    DirtTextureDescriptorInfo.ShaderStageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    DirtTextureDescriptorInfo.Count = 1;
-    DirtTextureDescriptorInfo.Texture = DirtTexture;
-
-    // Descriptor Set Info
-    ctk::smap<vtk::descriptor_set_info, 4> DescriptorSetInfos = {};
-
-    vtk::descriptor_set_info *EntityDescriptorSetInfo = ctk::Push(&DescriptorSetInfos, "entity");
-    EntityDescriptorSetInfo->InstanceCount = FrameState->Frames.Count;
-    ctk::Push(&EntityDescriptorSetInfo->DescriptorBindings, { 0, &EntityDescriptorInfo });
-
-    vtk::descriptor_set_info *GrassTextureDescriptorSetInfo = ctk::Push(&DescriptorSetInfos, "grass_texture");
-    GrassTextureDescriptorSetInfo->InstanceCount = 1;
-    ctk::Push(&GrassTextureDescriptorSetInfo->DescriptorBindings, { 0, &GrassTextureDescriptorInfo });
-
-    vtk::descriptor_set_info *DirtTextureDescriptorSetInfo = ctk::Push(&DescriptorSetInfos, "dirt_texture");
-    DirtTextureDescriptorSetInfo->InstanceCount = 1;
-    ctk::Push(&DirtTextureDescriptorSetInfo->DescriptorBindings, { 0, &DirtTextureDescriptorInfo });
-
-    // Pool
-    VkDescriptorPool DescriptorPool = vtk::CreateDescriptorPool(Device->Logical, DescriptorSetInfos.Values, DescriptorSetInfos.Count);
-
-    // Mirror descriptor set infos map to store descriptor sets.
-    for(u32 DescriptorSetIndex = 0; DescriptorSetIndex < DescriptorSetInfos.Count; ++DescriptorSetIndex)
-    {
-        ctk::Push(DescriptorSets, DescriptorSetInfos.Keys[DescriptorSetIndex]);
-    }
-    vtk::CreateDescriptorSets(Device->Logical, DescriptorPool, DescriptorSetInfos.Values, DescriptorSetInfos.Count, DescriptorSets->Values);
 }
 
 static void
@@ -523,21 +460,29 @@ LoadVulkanState(graphics_state *GraphicsState, ctk::data *VulkanData)
     vtk::device *Device = &GraphicsState->Device;
     vtk::swapchain *Swapchain = &GraphicsState->Swapchain;
     vtk::render_pass *RenderPass = &GraphicsState->RenderPass;
+    vtk::frame_state *FrameState = &GraphicsState->FrameState;
+    vtk::region *StagingRegion = &GraphicsState->StagingRegion;
+    VkCommandPool *GraphicsCommandPool = &GraphicsState->GraphicsCommandPool;
     vtk::vertex_layout *VertexLayout = &GraphicsState->VertexLayout;
-    ctk::smap<u32, 4> *VertexAttributeIndexes = &GraphicsState->VertexAttributeIndexes;
+    VkDescriptorPool *DescriptorPool = &GraphicsState->DescriptorPool;
+    ctk::smap<vtk::texture, 4> *Textures = &GraphicsState->Textures;
     ctk::smap<vtk::shader_module, 16> *ShaderModules = &GraphicsState->ShaderModules;
-    ctk::smap<vtk::graphics_pipeline, 4> *GraphicsPipelines = &GraphicsState->GraphicsPipelines;
+    ctk::smap<vtk::uniform_buffer, 4> *UniformBuffers = &GraphicsState->UniformBuffers;
     ctk::smap<vtk::descriptor_set, 4> *DescriptorSets = &GraphicsState->DescriptorSets;
+    ctk::smap<u32, 4> *VertexAttributeIndexes = &GraphicsState->VertexAttributeIndexes;
+    ctk::smap<vtk::graphics_pipeline, 4> *GraphicsPipelines = &GraphicsState->GraphicsPipelines;
 
     ////////////////////////////////////////////////////////////
-    /// Vertex Layout
+    /// Textures
     ////////////////////////////////////////////////////////////
-    ctk::data *VertexLayoutMap = ctk::At(VulkanData, "vertex_layout");
-    for(u32 VertexAttributeIndex = 0; VertexAttributeIndex < VertexLayoutMap->Children.Count; ++VertexAttributeIndex)
+    ctk::data *TextureMap = ctk::At(VulkanData, "textures");
+    for(u32 TextureIndex = 0; TextureIndex < TextureMap->Children.Count; ++TextureIndex)
     {
-        ctk::data *VertexAttributeData = ctk::At(VertexLayoutMap, VertexAttributeIndex);
-        ctk::Push(VertexAttributeIndexes, VertexAttributeData->Key.Data,
-                  vtk::PushVertexAttribute(&GraphicsState->VertexLayout, ctk::U32(VertexAttributeData, "element_count")));
+        ctk::data *TextureData = ctk::At(TextureMap, TextureIndex);
+        vtk::texture_info TextureInfo = {};
+        TextureInfo.Filter = vtk::GetVkFilter(ctk::CStr(TextureData, "filter"));
+        ctk::Push(Textures, TextureData->Key.Data,
+                  vtk::LoadTexture(Device, *GraphicsCommandPool, StagingRegion, ctk::CStr(TextureData, "path"), &TextureInfo));
     }
 
     ////////////////////////////////////////////////////////////
@@ -550,6 +495,85 @@ LoadVulkanState(graphics_state *GraphicsState, ctk::data *VulkanData)
         VkShaderStageFlagBits Stage = vtk::GetVkShaderStageFlagBits(ctk::CStr(ShaderModuleData, "stage"));
         ctk::Push(ShaderModules, ShaderModuleData->Key.Data,
                   vtk::CreateShaderModule(Device->Logical, ctk::CStr(ShaderModuleData, "path"), Stage));
+    }
+
+    ////////////////////////////////////////////////////////////
+    /// Descriptor Sets
+    ////////////////////////////////////////////////////////////
+
+    // Descriptor Infos
+    ctk::smap<vtk::descriptor_info, 8> DescriptorInfos = {};
+    ctk::data *DescriptorMap = ctk::At(VulkanData, "descriptors");
+    for(u32 DescriptorIndex = 0; DescriptorIndex < DescriptorMap->Children.Count; ++DescriptorIndex)
+    {
+        ctk::data *DescriptorData = ctk::At(DescriptorMap, DescriptorIndex);
+        ctk::data *ShaderStageFlagsArray = ctk::At(DescriptorData, "shader_stage_flags");
+        VkDescriptorType Type = vtk::GetVkDescriptorType(ctk::CStr(DescriptorData, "type"));
+        VkShaderStageFlags ShaderStageFlags = 0;
+        for(u32 ShaderStageIndex = 0; ShaderStageIndex < ShaderStageFlagsArray->Children.Count; ++ShaderStageIndex)
+        {
+            ShaderStageFlags |= vtk::GetVkShaderStageFlagBits(ctk::CStr(ShaderStageFlagsArray, ShaderStageIndex));
+        }
+
+        vtk::descriptor_info* DescriptorInfo = ctk::Push(&DescriptorInfos, DescriptorData->Key.Data);
+        DescriptorInfo->Type = Type;
+        DescriptorInfo->ShaderStageFlags = ShaderStageFlags;
+        DescriptorInfo->Count = ctk::U32(DescriptorData, "count");
+        if(Type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
+           Type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC)
+        {
+            DescriptorInfo->UniformBuffer = ctk::At(UniformBuffers, ctk::CStr(DescriptorData, "uniform_buffer"));
+        }
+        else if(Type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        {
+            DescriptorInfo->Texture = ctk::At(Textures, ctk::CStr(DescriptorData, "texture"));
+        }
+        else
+        {
+            CTK_FATAL("unhandled descriptor type when loading descriptors")
+        }
+    }
+
+    // Descriptor Set Infos
+    ctk::smap<vtk::descriptor_set_info, 8> DescriptorSetInfos = {};
+    ctk::data *DescriptorSetMap = ctk::At(VulkanData, "descriptor_sets");
+    for(u32 DescriptorSetIndex = 0; DescriptorSetIndex < DescriptorSetMap->Children.Count; ++DescriptorSetIndex)
+    {
+        ctk::data *DescriptorSetData = ctk::At(DescriptorSetMap, DescriptorSetIndex);
+        vtk::descriptor_set_info *DescriptorSetInfo = ctk::Push(&DescriptorSetInfos, DescriptorSetData->Key.Data);
+        b32 IsDynamic = ctk::StringEqual(ctk::CStr(DescriptorSetData, "type"), "dynamic");
+        DescriptorSetInfo->InstanceCount = IsDynamic ? FrameState->Frames.Count : 1;
+        ctk::data *DescriptorBindingArray = ctk::At(DescriptorSetData, "descriptor_bindings");
+        for(u32 DescriptorBindingIndex = 0; DescriptorBindingIndex < DescriptorBindingArray->Children.Count; ++DescriptorBindingIndex)
+        {
+            ctk::data *DescriptorBindingData = ctk::At(DescriptorBindingArray, DescriptorBindingIndex);
+            ctk::Push(&DescriptorSetInfo->DescriptorBindings,
+                      {
+                          ctk::U32(DescriptorBindingData, "binding"),
+                          ctk::At(&DescriptorInfos, ctk::CStr(DescriptorBindingData, "descriptor")),
+                      });
+        }
+    }
+
+    // Pool
+    *DescriptorPool = vtk::CreateDescriptorPool(Device->Logical, DescriptorSetInfos.Values, DescriptorSetInfos.Count);
+
+    // Mirror descriptor set infos map to store descriptor sets.
+    for(u32 DescriptorSetIndex = 0; DescriptorSetIndex < DescriptorSetInfos.Count; ++DescriptorSetIndex)
+    {
+        ctk::Push(DescriptorSets, DescriptorSetInfos.Keys[DescriptorSetIndex]);
+    }
+    vtk::CreateDescriptorSets(Device->Logical, *DescriptorPool, DescriptorSetInfos.Values, DescriptorSetInfos.Count, DescriptorSets->Values);
+
+    ////////////////////////////////////////////////////////////
+    /// Vertex Layout
+    ////////////////////////////////////////////////////////////
+    ctk::data *VertexLayoutMap = ctk::At(VulkanData, "vertex_layout");
+    for(u32 VertexAttributeIndex = 0; VertexAttributeIndex < VertexLayoutMap->Children.Count; ++VertexAttributeIndex)
+    {
+        ctk::data *VertexAttributeData = ctk::At(VertexLayoutMap, VertexAttributeIndex);
+        ctk::Push(VertexAttributeIndexes, VertexAttributeData->Key.Data,
+                  vtk::PushVertexAttribute(&GraphicsState->VertexLayout, ctk::U32(VertexAttributeData, "element_count")));
     }
 
     ////////////////////////////////////////////////////////////
@@ -650,9 +674,13 @@ CreateGraphicsState(window *Window, input_state *InputState)
     vtk::buffer *HostBuffer = &GraphicsState->HostBuffer;
     vtk::buffer *DeviceBuffer = &GraphicsState->DeviceBuffer;
     vtk::region *StagingRegion = &GraphicsState->StagingRegion;
-    vtk::uniform_buffer *EntityUniformBuffer = &GraphicsState->EntityUniformBuffer;
+    ctk::smap<vtk::uniform_buffer, 4> *UniformBuffers = &GraphicsState->UniformBuffers;
     ctk::data VulkanData = ctk::LoadData("assets/vulkan.ctkd");
     InitVulkan(GraphicsState, Window, &VulkanData);
+
+    // Uniform Buffers
+    ctk::Push(UniformBuffers, "entity", vtk::CreateUniformBuffer(HostBuffer, 2, sizeof(entity_ubo), FrameState->Frames.Count));
+
     LoadVulkanState(GraphicsState, &VulkanData);
 
     ////////////////////////////////////////////////////////////
@@ -885,7 +913,8 @@ CreateGraphicsState(window *Window, input_state *InputState)
             EntityUBOs[EntityIndex].ModelMatrix = ModelMatrix;
             EntityUBOs[EntityIndex].MVPMatrix = ProjectionMatrix * ViewMatrix * ModelMatrix;
         }
-        vtk::WriteToHostRegion(Device->Logical, EntityUniformBuffer->Regions + FrameState->CurrentFrameIndex, EntityUBOs, sizeof(EntityUBOs), 0);
+        vtk::WriteToHostRegion(Device->Logical, ctk::At(UniformBuffers, "entity")->Regions + FrameState->CurrentFrameIndex,
+                               EntityUBOs, sizeof(EntityUBOs), 0);
 
         ////////////////////////////////////////////////////////////
         /// Rendering

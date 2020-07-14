@@ -1,11 +1,5 @@
 debug true
 app_name "gfx renderer"
-vertex_layout
-{
-    position { element_count 3 }
-    # normal { element_count 3 }
-    uv { element_count 2 }
-}
 shader_modules
 {
     unlit_color_vert
@@ -18,6 +12,67 @@ shader_modules
         path assets/shaders/shader.frag.spv
         stage VK_SHADER_STAGE_FRAGMENT_BIT
     }
+}
+textures
+{
+    grass
+    {
+        path assets/textures/grass.jpg
+        filter VK_FILTER_NEAREST
+    }
+    dirt
+    {
+        path assets/textures/dirt.jpg
+        filter VK_FILTER_NEAREST
+    }
+}
+descriptors
+{
+    entity
+    {
+        type VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
+        shader_stage_flags [ VK_SHADER_STAGE_VERTEX_BIT ]
+        count 1
+        uniform_buffer entity
+    }
+    grass_texture
+    {
+        type VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+        shader_stage_flags [ VK_SHADER_STAGE_FRAGMENT_BIT ]
+        count 1
+        texture grass
+    }
+    dirt_texture
+    {
+        type VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+        shader_stage_flags [ VK_SHADER_STAGE_FRAGMENT_BIT ]
+        count 1
+        texture dirt
+    }
+}
+descriptor_sets
+{
+    entity
+    {
+        type dynamic
+        descriptor_bindings [ { binding 0 descriptor entity } ]
+    }
+    grass_texture
+    {
+        type static
+        descriptor_bindings [ { binding 0 descriptor grass_texture } ]
+    }
+    dirt_texture
+    {
+        type static
+        descriptor_bindings [ { binding 0 descriptor dirt_texture } ]
+    }
+}
+vertex_layout
+{
+    position { element_count 3 }
+    # normal { element_count 3 }
+    uv { element_count 2 }
 }
 graphics_pipelines
 {
@@ -42,25 +97,3 @@ graphics_pipelines
         ]
     }
 }
-# descriptor_sets
-# {
-#     mvp_matrixes
-#     [
-#         {
-#             type VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
-#             shader_stages [ VK_SHADER_STAGE_VERTEX_BIT ]
-#             count 1
-#             uniform_region mvp_matrixes
-#         }
-#     ]
-# }
-# graphics_pipelines
-# {
-#     unlit
-#     {
-#         descriptor_sets
-#         [
-#             mvp_matrixes
-#         ]
-#     }
-# }
