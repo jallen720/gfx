@@ -18,6 +18,9 @@
     <ClCompile Include="test.cc">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="gfx.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="gfx.h">

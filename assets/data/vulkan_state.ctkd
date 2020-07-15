@@ -1,31 +1,3 @@
-debug true
-app_name "gfx renderer"
-shader_modules
-{
-    unlit_color_vert
-    {
-        path assets/shaders/shader.vert.spv
-        stage VK_SHADER_STAGE_VERTEX_BIT
-    }
-    unlit_color_frag
-    {
-        path assets/shaders/shader.frag.spv
-        stage VK_SHADER_STAGE_FRAGMENT_BIT
-    }
-}
-textures
-{
-    grass
-    {
-        path assets/textures/grass.jpg
-        filter VK_FILTER_NEAREST
-    }
-    dirt
-    {
-        path assets/textures/dirt.jpg
-        filter VK_FILTER_NEAREST
-    }
-}
 descriptors
 {
     entity
@@ -71,7 +43,7 @@ descriptor_sets
 vertex_layout
 {
     position { element_count 3 }
-    # normal { element_count 3 }
+    normal { element_count 3 }
     uv { element_count 2 }
 }
 graphics_pipelines
