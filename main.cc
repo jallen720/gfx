@@ -21,13 +21,13 @@ main()
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
     vtk::frame_state *FrameState = &VulkanInstance->FrameState;
     vtk::render_pass *RenderPass = &VulkanInstance->RenderPass;
-    ctk::sarray<VkCommandBuffer, 4> *CommandBuffers = &VulkanInstance->CommandBuffers;
+    auto *CommandBuffers = &VulkanInstance->CommandBuffers;
 
     ////////////////////////////////////////////////////////////
     /// Scene
     ////////////////////////////////////////////////////////////
-    ctk::smap<vtk::descriptor_set, 4> *DescriptorSets = &VulkanState->DescriptorSets;
-    ctk::smap<vtk::graphics_pipeline, 4> *GraphicsPipelines = &VulkanState->GraphicsPipelines;
+    auto *DescriptorSets = &VulkanState->DescriptorSets;
+    auto *GraphicsPipelines = &VulkanState->GraphicsPipelines;
     ctk::sarray<render_entity, 4> RenderEntities = {};
     render_entity *QuadEntity = ctk::Push(&RenderEntities);
     ctk::Push(&QuadEntity->DescriptorSets, At(DescriptorSets, "entity"));
@@ -37,9 +37,9 @@ main()
 
     render_entity *CubeEntity = ctk::Push(&RenderEntities);
     ctk::Push(&CubeEntity->DescriptorSets, At(DescriptorSets, "entity"));
-    ctk::Push(&CubeEntity->DescriptorSets, At(DescriptorSets, "grass_cube_texture"));
+    ctk::Push(&CubeEntity->DescriptorSets, At(DescriptorSets, "brick_texture"));
     CubeEntity->GraphicsPipeline = ctk::At(GraphicsPipelines, "default");
-    CubeEntity->Mesh = ctk::At(&Assets->Meshes, "cube");
+    CubeEntity->Mesh = ctk::At(&Assets->Meshes, "sibenik");
 
     glm::vec3 CameraPosition = { 0.0f, 0.0f, -1.0f };
     glm::vec3 CameraRotation = { 0.0f, 0.0f, 0.0f };

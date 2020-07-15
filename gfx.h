@@ -78,10 +78,10 @@ struct vulkan_state
 {
     VkDescriptorPool DescriptorPool;
     vtk::vertex_layout VertexLayout;
-    ctk::smap<vtk::uniform_buffer, 4> UniformBuffers;
-    ctk::smap<vtk::descriptor_set, 4> DescriptorSets;
+    ctk::smap<vtk::uniform_buffer, 16> UniformBuffers;
+    ctk::smap<vtk::descriptor_set, 16> DescriptorSets;
     ctk::smap<u32, 4> VertexAttributeIndexes;
-    ctk::smap<vtk::graphics_pipeline, 4> GraphicsPipelines;
+    ctk::smap<vtk::graphics_pipeline, 16> GraphicsPipelines;
 };
 
 struct entity_ubo

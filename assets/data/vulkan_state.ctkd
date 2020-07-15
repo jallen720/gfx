@@ -28,6 +28,13 @@ descriptors
         count 1
         texture dirt
     }
+    brick_texture
+    {
+        type VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+        shader_stage_flags [ VK_SHADER_STAGE_FRAGMENT_BIT ]
+        count 1
+        texture brick
+    }
 }
 descriptor_sets
 {
@@ -50,6 +57,11 @@ descriptor_sets
     {
         type static
         descriptor_bindings [ { binding 0 descriptor dirt_texture } ]
+    }
+    brick_texture
+    {
+        type static
+        descriptor_bindings [ { binding 0 descriptor brick_texture } ]
     }
 }
 vertex_layout

@@ -166,7 +166,7 @@ create_vulkan_instance(window *Window)
     VkCommandPool *GraphicsCommandPool = &VulkanInstance->GraphicsCommandPool;
     vtk::image *DepthImage = &VulkanInstance->DepthImage;
     vtk::render_pass *RenderPass = &VulkanInstance->RenderPass;
-    ctk::sarray<VkCommandBuffer, 4> *CommandBuffers = &VulkanInstance->CommandBuffers;
+    auto *CommandBuffers = &VulkanInstance->CommandBuffers;
     vtk::buffer *HostBuffer = &VulkanInstance->HostBuffer;
 
     // Load data file.
@@ -280,19 +280,19 @@ create_vulkan_instance(window *Window)
 
     // Buffers
     vtk::buffer_info HostBufferInfo = {};
-    HostBufferInfo.Size = 10 * CTK_MEGABYTE;
+    HostBufferInfo.Size = 100 * CTK_MEGABYTE;
     HostBufferInfo.UsageFlags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     HostBufferInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     *HostBuffer = vtk::CreateBuffer(Device, &HostBufferInfo);
 
     vtk::buffer_info DeviceBufferInfo = {};
-    DeviceBufferInfo.Size = 10 * CTK_MEGABYTE;
+    DeviceBufferInfo.Size = 100 * CTK_MEGABYTE;
     DeviceBufferInfo.UsageFlags = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     DeviceBufferInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     VulkanInstance->DeviceBuffer = vtk::CreateBuffer(Device, &DeviceBufferInfo);
 
     // Regions
-    VulkanInstance->StagingRegion = vtk::AllocateRegion(HostBuffer, 2 * CTK_MEGABYTE);
+    VulkanInstance->StagingRegion = vtk::AllocateRegion(HostBuffer, 50 * CTK_MEGABYTE);
 
     return VulkanInstance;
 }
@@ -358,9 +358,9 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
 
     VkDescriptorPool *DescriptorPool = &VulkanState->DescriptorPool;
     vtk::vertex_layout *VertexLayout = &VulkanState->VertexLayout;
-    ctk::smap<vtk::uniform_buffer, 4> *UniformBuffers = &VulkanState->UniformBuffers;
-    ctk::smap<vtk::descriptor_set, 4> *DescriptorSets = &VulkanState->DescriptorSets;
-    ctk::smap<u32, 4> *VertexAttributeIndexes = &VulkanState->VertexAttributeIndexes;
+    auto *UniformBuffers = &VulkanState->UniformBuffers;
+    auto *DescriptorSets = &VulkanState->DescriptorSets;
+    auto *VertexAttributeIndexes = &VulkanState->VertexAttributeIndexes;
 
     // Load data file.
     ctk::data VulkanStateData = ctk::LoadData("assets/data/vulkan_state.ctkd");

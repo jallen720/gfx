@@ -5,15 +5,20 @@ textures
         path assets/textures/grass.jpg
         filter VK_FILTER_NEAREST
     }
+    grass_cube
+    {
+        path assets/textures/grass_cube.png
+        filter VK_FILTER_NEAREST
+    }
     dirt
     {
         path assets/textures/dirt.jpg
         filter VK_FILTER_NEAREST
     }
-    grass_cube
+    brick
     {
-        path assets/textures/grass_cube.png
-        filter VK_FILTER_NEAREST
+        path assets/textures/brick.jpeg
+        filter VK_FILTER_LINEAR
     }
 }
 shader_modules
@@ -33,4 +38,5 @@ models
 {
     cube { path assets/models/cube.obj }
     quad { path assets/models/quad.obj }
+    sibenik { path assets/models/sibenik/sibenik.obj }
 }
