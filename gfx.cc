@@ -7,8 +7,6 @@
 #include "gfx/gfx.h"
 #include "ctk/data.h"
 
-namespace gfx {
-
 ////////////////////////////////////////////////////////////
 /// Internal
 ////////////////////////////////////////////////////////////
@@ -21,21 +19,21 @@ error_callback(s32 Error, cstr Description)
 static void
 key_callback(GLFWwindow *Window, s32 Key, s32 Scancode, s32 Action, s32 Mods)
 {
-    auto InputState = (input_state *)glfwGetWindowUserPointer(Window);
+    auto InputState = (gfx_input_state *)glfwGetWindowUserPointer(Window);
     InputState->KeyDown[Key] = Action == GLFW_PRESS || Action == GLFW_REPEAT;
 }
 
 static void
 mouse_button_callback(GLFWwindow *Window, s32 button, s32 Action, s32 Mods)
 {
-    auto InputState = (input_state *)glfwGetWindowUserPointer(Window);
+    auto InputState = (gfx_input_state *)glfwGetWindowUserPointer(Window);
     InputState->MouseButtonDown[button] = Action == GLFW_PRESS || Action == GLFW_REPEAT;
 }
 
-static mesh
-create_mesh(vulkan_instance *VulkanInstance, cstr Path)
+static gfx_mesh
+create_mesh(gfx_vulkan_instance *VulkanInstance, cstr Path)
 {
-    mesh Mesh = {};
+    gfx_mesh Mesh = {};
 
     vtk::device *Device = &VulkanInstance->Device;
     VkCommandPool GraphicsCommandPool = VulkanInstance->GraphicsCommandPool;
@@ -67,7 +65,7 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
             IndexCount += Mesh->mFaces[FaceIndex].mNumIndices;
         }
     }
-    Mesh.Vertexes = ctk::CreateArrayEmpty<vertex>(VertexCount);
+    Mesh.Vertexes = ctk::CreateArrayEmpty<gfx_vertex>(VertexCount);
     Mesh.Indexes = ctk::CreateArrayEmpty<u32>(IndexCount);
 
     ////////////////////////////////////////////////////////////
@@ -79,7 +77,7 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
         u32 IndexBase = Mesh.Vertexes.Count;
         for(u32 VertexIndex = 0; VertexIndex < SceneMesh->mNumVertices; ++VertexIndex)
         {
-            vertex *Vertex = ctk::Push(&Mesh.Vertexes);
+            gfx_vertex *Vertex = ctk::Push(&Mesh.Vertexes);
             aiVector3D *Position = SceneMesh->mVertices + VertexIndex;
             aiVector3D *Normal = SceneMesh->mNormals + VertexIndex;
             Vertex->Position = { Position->x, Position->y, Position->z };
@@ -125,10 +123,10 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
 ////////////////////////////////////////////////////////////
 /// Interface
 ////////////////////////////////////////////////////////////
-window *
-create_window(input_state *InputState)
+gfx_window *
+gfx_create_window(gfx_input_state *InputState)
 {
-    window *Window = ctk::Alloc<window>();
+    gfx_window *Window = ctk::Alloc<gfx_window>();
     *Window = {};
     ctk::data Data = ctk::LoadData("assets/data/window.ctkd");
     glfwSetErrorCallback(error_callback);
@@ -153,10 +151,10 @@ create_window(input_state *InputState)
     return Window;
 }
 
-vulkan_instance *
-create_vulkan_instance(window *Window)
+gfx_vulkan_instance *
+gfx_create_vulkan_instance(gfx_window *Window)
 {
-    vulkan_instance *VulkanInstance = ctk::Alloc<vulkan_instance>();
+    gfx_vulkan_instance *VulkanInstance = ctk::Alloc<gfx_vulkan_instance>();
     *VulkanInstance = {};
 
     vtk::instance *Instance = &VulkanInstance->Instance;
@@ -166,7 +164,6 @@ create_vulkan_instance(window *Window)
     VkCommandPool *GraphicsCommandPool = &VulkanInstance->GraphicsCommandPool;
     vtk::image *DepthImage = &VulkanInstance->DepthImage;
     vtk::render_pass *RenderPass = &VulkanInstance->RenderPass;
-    auto *CommandBuffers = &VulkanInstance->CommandBuffers;
     vtk::buffer *HostBuffer = &VulkanInstance->HostBuffer;
 
     // Load data file.
@@ -256,23 +253,18 @@ create_vulkan_instance(window *Window)
     Subpass->DepthAttachmentReference.Value.attachment = DepthAttachmentIndex;
     Subpass->DepthAttachmentReference.Value.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-    // Creation
-    *RenderPass = vtk::CreateRenderPass(Device->Logical, &RenderPassInfo);
-
-    // Framebuffers
+    // Framebuffer Infos
     for(u32 FramebufferIndex = 0; FramebufferIndex < Swapchain->Images.Count; ++FramebufferIndex)
     {
-        vtk::framebuffer_info FramebufferInfo = {};
-        ctk::Push(&FramebufferInfo.Attachments, Swapchain->Images[FramebufferIndex].View);
-        ctk::Push(&FramebufferInfo.Attachments, DepthImage->View);
-        FramebufferInfo.Extent = Swapchain->Extent;
-        FramebufferInfo.Layers = 1;
-        ctk::Push(&VulkanInstance->Framebuffers, vtk::CreateFramebuffer(Device->Logical, RenderPass->Handle, &FramebufferInfo));
+        vtk::framebuffer_info *FramebufferInfo = ctk::Push(&RenderPassInfo.FramebufferInfos);
+        ctk::Push(&FramebufferInfo->Attachments, Swapchain->Images[FramebufferIndex].View);
+        ctk::Push(&FramebufferInfo->Attachments, DepthImage->View);
+        FramebufferInfo->Extent = Swapchain->Extent;
+        FramebufferInfo->Layers = 1;
     }
 
-    // Command Buffers
-    CommandBuffers->Count = Swapchain->Images.Count;
-    vtk::AllocateCommandBuffers(Device->Logical, *GraphicsCommandPool, Swapchain->Images.Count, CommandBuffers->Data);
+    // Creation
+    *RenderPass = vtk::CreateRenderPass(Device->Logical, *GraphicsCommandPool, &RenderPassInfo);
 
     ////////////////////////////////////////////////////////////
     /// Memory
@@ -297,10 +289,10 @@ create_vulkan_instance(window *Window)
     return VulkanInstance;
 }
 
-assets *
-create_assets(vulkan_instance *VulkanInstance)
+gfx_assets *
+gfx_create_assets(gfx_vulkan_instance *VulkanInstance)
 {
-    assets *Assets = ctk::Alloc<assets>();
+    gfx_assets *Assets = ctk::Alloc<gfx_assets>();
     *Assets = {};
 
     vtk::device *Device = &VulkanInstance->Device;
@@ -347,10 +339,10 @@ create_assets(vulkan_instance *VulkanInstance)
     return Assets;
 }
 
-vulkan_state *
-create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
+gfx_vulkan_state *
+gfx_create_vulkan_state(gfx_vulkan_instance *VulkanInstance, gfx_assets *Assets)
 {
-    vulkan_state *VulkanState = ctk::Alloc<vulkan_state>();
+    gfx_vulkan_state *VulkanState = ctk::Alloc<gfx_vulkan_state>();
     *VulkanState = {};
 
     vtk::device *Device = &VulkanInstance->Device;
@@ -368,7 +360,8 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
     ////////////////////////////////////////////////////////////
     /// Predefined State
     ////////////////////////////////////////////////////////////
-    ctk::Push(UniformBuffers, "entity", vtk::CreateUniformBuffer(&VulkanInstance->HostBuffer, 2, sizeof(entity_ubo), FrameState->Frames.Count));
+    ctk::Push(UniformBuffers, "entity",
+              vtk::CreateUniformBuffer(&VulkanInstance->HostBuffer, 2, sizeof(gfx_entity_ubo), FrameState->Frames.Count));
 
     ////////////////////////////////////////////////////////////
     /// Descriptor Sets
@@ -490,5 +483,3 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
 
     return VulkanState;
 }
-
-} // gfx

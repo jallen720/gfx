@@ -5,23 +5,22 @@ struct render_entity
 {
     ctk::sarray<vtk::descriptor_set *, 4> DescriptorSets;
     vtk::graphics_pipeline *GraphicsPipeline;
-    gfx::mesh *Mesh;
+    gfx_mesh *Mesh;
 };
 
 s32
 main()
 {
-    gfx::input_state InputState = {};
-    gfx::window *Window = gfx::create_window(&InputState);
-    gfx::vulkan_instance *VulkanInstance = gfx::create_vulkan_instance(Window);
-    gfx::assets *Assets = gfx::create_assets(VulkanInstance);
-    gfx::vulkan_state *VulkanState = gfx::create_vulkan_state(VulkanInstance, Assets);
+    gfx_input_state InputState = {};
+    gfx_window *Window = gfx_create_window(&InputState);
+    gfx_vulkan_instance *VulkanInstance = gfx_create_vulkan_instance(Window);
+    gfx_assets *Assets = gfx_create_assets(VulkanInstance);
+    gfx_vulkan_state *VulkanState = gfx_create_vulkan_state(VulkanInstance, Assets);
 
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
     vtk::frame_state *FrameState = &VulkanInstance->FrameState;
     vtk::render_pass *RenderPass = &VulkanInstance->RenderPass;
-    auto *CommandBuffers = &VulkanInstance->CommandBuffers;
 
     ////////////////////////////////////////////////////////////
     /// Scene
@@ -64,13 +63,13 @@ main()
 
     for(u32 FrameIndex = 0; FrameIndex < FrameState->Frames.Count; ++FrameIndex)
     {
-        VkCommandBuffer CommandBuffer = *At(CommandBuffers, FrameIndex);
+        VkCommandBuffer CommandBuffer = *At(&RenderPass->CommandBuffers, FrameIndex);
         vtk::ValidateVkResult(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
                               "vkBeginCommandBuffer", "failed to begin recording command buffer");
         VkRenderPassBeginInfo RenderPassBeginInfo = {};
         RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         RenderPassBeginInfo.renderPass = RenderPass->Handle;
-        RenderPassBeginInfo.framebuffer = *At(&VulkanInstance->Framebuffers, FrameIndex);
+        RenderPassBeginInfo.framebuffer = *At(&RenderPass->Framebuffers, FrameIndex);
         RenderPassBeginInfo.renderArea = RenderArea;
         RenderPassBeginInfo.clearValueCount = RenderPass->ClearValues.Count;
         RenderPassBeginInfo.pClearValues = RenderPass->ClearValues.Data;
@@ -82,7 +81,7 @@ main()
         for(u32 EntityIndex = 0; EntityIndex < RenderEntities.Count; ++EntityIndex)
         {
             render_entity *RenderEntity = RenderEntities + EntityIndex;
-            gfx::mesh *Mesh = RenderEntity->Mesh;
+            gfx_mesh *Mesh = RenderEntity->Mesh;
 
             // Graphics Pipeline
             vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, RenderEntity->GraphicsPipeline->Handle);
@@ -128,7 +127,7 @@ main()
         InputState.MousePosition = { CurrentMouseX, CurrentMouseY };
 
         // Calculate delta if previous position was not unset.
-        if(PreviousMousePosition != gfx::UNSET_MOUSE_POSITION)
+        if(PreviousMousePosition != GFX_UNSET_MOUSE_POSITION)
         {
             InputState.MouseDelta = InputState.MousePosition - PreviousMousePosition;
         }
@@ -187,7 +186,7 @@ main()
         ////////////////////////////////////////////////////////////
         /// Update Uniform Data
         ////////////////////////////////////////////////////////////
-        gfx::entity_ubo EntityUBOs[2] = {};
+        gfx_entity_ubo EntityUBOs[2] = {};
 
         // View Matrix
         glm::mat4 CameraMatrix(1.0f);
@@ -251,7 +250,7 @@ main()
         VkSemaphore QueueSubmitWaitSemaphores[] = { CurrentFrame->ImageAquiredSemaphore };
         VkPipelineStageFlags QueueSubmitWaitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
         VkSemaphore QueueSubmitSignalSemaphores[] = { CurrentFrame->RenderFinishedSemaphore };
-        VkCommandBuffer QueueSubmitCommandBuffers[] = { *At(CommandBuffers, SwapchainImageIndex) };
+        VkCommandBuffer QueueSubmitCommandBuffers[] = { *At(&RenderPass->CommandBuffers, SwapchainImageIndex) };
 
         VkSubmitInfo SubmitInfos[1] = {};
         SubmitInfos[0].sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;

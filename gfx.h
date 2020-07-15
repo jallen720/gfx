@@ -10,32 +10,30 @@
 #include "ctk/ctk.h"
 #include "ctk/math.h"
 
-namespace gfx {
-
 ////////////////////////////////////////////////////////////
 /// Constants
 ////////////////////////////////////////////////////////////
-static const ctk::vec2<f64> UNSET_MOUSE_POSITION = { -10000.0, -10000.0 };
+static const ctk::vec2<f64> GFX_UNSET_MOUSE_POSITION = { -10000.0, -10000.0 };
 
 ////////////////////////////////////////////////////////////
 /// Data
 ////////////////////////////////////////////////////////////
-struct window
+struct gfx_window
 {
     GLFWwindow *Handle;
     u32 Width;
     u32 Height;
 };
 
-struct input_state
+struct gfx_input_state
 {
     b32 KeyDown[GLFW_KEY_LAST + 1];
     b32 MouseButtonDown[GLFW_MOUSE_BUTTON_LAST + 1];
-    ctk::vec2<f64> MousePosition = UNSET_MOUSE_POSITION;
+    ctk::vec2<f64> MousePosition = GFX_UNSET_MOUSE_POSITION;
     ctk::vec2<f64> MouseDelta;
 };
 
-struct vulkan_instance
+struct gfx_vulkan_instance
 {
     vtk::instance Instance;
     VkSurfaceKHR PlatformSurface;
@@ -45,36 +43,34 @@ struct vulkan_instance
     vtk::frame_state FrameState;
     vtk::image DepthImage;
     vtk::render_pass RenderPass;
-    ctk::sarray<VkFramebuffer, 4> Framebuffers;
-    ctk::sarray<VkCommandBuffer, 4> CommandBuffers;
     vtk::buffer HostBuffer;
     vtk::buffer DeviceBuffer;
     vtk::region StagingRegion;
 };
 
-struct vertex
+struct gfx_vertex
 {
     ctk::vec3<f32> Position;
     ctk::vec3<f32> Normal;
     ctk::vec2<f32> UV;
 };
 
-struct mesh
+struct gfx_mesh
 {
-    ctk::array<vertex> Vertexes;
+    ctk::array<gfx_vertex> Vertexes;
     ctk::array<u32> Indexes;
     vtk::region VertexRegion;
     vtk::region IndexRegion;
 };
 
-struct assets
+struct gfx_assets
 {
-    ctk::smap<mesh, 16> Meshes;
+    ctk::smap<gfx_mesh, 16> Meshes;
     ctk::smap<vtk::texture, 16> Textures;
     ctk::smap<vtk::shader_module, 16> ShaderModules;
 };
 
-struct vulkan_state
+struct gfx_vulkan_state
 {
     VkDescriptorPool DescriptorPool;
     vtk::vertex_layout VertexLayout;
@@ -84,7 +80,7 @@ struct vulkan_state
     ctk::smap<vtk::graphics_pipeline, 16> GraphicsPipelines;
 };
 
-struct entity_ubo
+struct gfx_entity_ubo
 {
     alignas(16) glm::mat4 ModelMatrix;
     alignas(16) glm::mat4 MVPMatrix;
@@ -93,16 +89,14 @@ struct entity_ubo
 ////////////////////////////////////////////////////////////
 /// Interface
 ////////////////////////////////////////////////////////////
-window *
-create_window(input_state *InputState);
+gfx_window *
+gfx_create_window(gfx_input_state *InputState);
 
-vulkan_instance *
-create_vulkan_instance(window *Window);
+gfx_vulkan_instance *
+gfx_create_vulkan_instance(gfx_window *Window);
 
-assets *
-create_assets(vulkan_instance *VulkanInstance);
+gfx_assets *
+gfx_create_assets(gfx_vulkan_instance *VulkanInstance);
 
-vulkan_state *
-create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets);
-
-} // gfx
+gfx_vulkan_state *
+gfx_create_vulkan_state(gfx_vulkan_instance *VulkanInstance, gfx_assets *Assets);
