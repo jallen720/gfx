@@ -15,9 +15,6 @@ namespace gfx {
 ////////////////////////////////////////////////////////////
 /// Constants
 ////////////////////////////////////////////////////////////
-static const u32 KILOBYTE = 1000;
-static const u32 MEGABYTE = 1000 * KILOBYTE;
-static const u32 GIGABYTE = 1000 * MEGABYTE;
 static const ctk::vec2<f64> UNSET_MOUSE_POSITION = { -10000.0, -10000.0 };
 
 ////////////////////////////////////////////////////////////
@@ -64,16 +61,16 @@ struct vertex
 
 struct mesh
 {
-    ctk::sarray<vertex, 24> Vertexes;
-    ctk::sarray<u32, 32> Indexes;
+    ctk::array<vertex> Vertexes;
+    ctk::array<u32> Indexes;
     vtk::region VertexRegion;
     vtk::region IndexRegion;
 };
 
 struct assets
 {
-    ctk::smap<mesh, 4> Meshes;
-    ctk::smap<vtk::texture, 4> Textures;
+    ctk::smap<mesh, 16> Meshes;
+    ctk::smap<vtk::texture, 16> Textures;
     ctk::smap<vtk::shader_module, 16> ShaderModules;
 };
 
@@ -97,15 +94,15 @@ struct entity_ubo
 /// Interface
 ////////////////////////////////////////////////////////////
 window *
-CreateWindow_(input_state *InputState);
+create_window(input_state *InputState);
 
 vulkan_instance *
-CreateVulkanInstance(window *Window);
+create_vulkan_instance(window *Window);
 
 assets *
-CreateAssets(vulkan_instance *VulkanInstance);
+create_assets(vulkan_instance *VulkanInstance);
 
 vulkan_state *
-CreateVulkanState(vulkan_instance *VulkanInstance, assets *Assets);
+create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets);
 
 } // gfx

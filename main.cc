@@ -12,82 +12,42 @@ s32
 main()
 {
     gfx::input_state InputState = {};
-    gfx::window *Window = gfx::CreateWindow_(&InputState);
-    gfx::vulkan_instance *VulkanInstance = gfx::CreateVulkanInstance(Window);
-    gfx::assets *Assets = gfx::CreateAssets(VulkanInstance);
-    gfx::vulkan_state *VulkanState = gfx::CreateVulkanState(VulkanInstance, Assets);
+    gfx::window *Window = gfx::create_window(&InputState);
+    gfx::vulkan_instance *VulkanInstance = gfx::create_vulkan_instance(Window);
+    gfx::assets *Assets = gfx::create_assets(VulkanInstance);
+    gfx::vulkan_state *VulkanState = gfx::create_vulkan_state(VulkanInstance, Assets);
 
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
     vtk::frame_state *FrameState = &VulkanInstance->FrameState;
-    VkCommandPool *GraphicsCommandPool = &VulkanInstance->GraphicsCommandPool;
     vtk::render_pass *RenderPass = &VulkanInstance->RenderPass;
-    ctk::sarray<VkFramebuffer, 4> *Framebuffers = &VulkanInstance->Framebuffers;
     ctk::sarray<VkCommandBuffer, 4> *CommandBuffers = &VulkanInstance->CommandBuffers;
-    vtk::buffer *HostBuffer = &VulkanInstance->HostBuffer;
-    vtk::buffer *DeviceBuffer = &VulkanInstance->DeviceBuffer;
-    vtk::region *StagingRegion = &VulkanInstance->StagingRegion;
-
-    ctk::smap<vtk::graphics_pipeline, 4> *GraphicsPipelines = &VulkanState->GraphicsPipelines;
-    ctk::smap<vtk::descriptor_set, 4> *DescriptorSets = &VulkanState->DescriptorSets;
-    ctk::smap<vtk::uniform_buffer, 4> *UniformBuffers = &VulkanState->UniformBuffers;
-
-    ////////////////////////////////////////////////////////////
-    /// Data
-    ////////////////////////////////////////////////////////////
-
-    // Meshes
-    gfx::mesh Meshes[2] = {};
-    gfx::mesh *QuadMesh = Meshes + 0;
-    gfx::mesh *CubeMesh = Meshes + 1;
-    u32 QuadIndexes[] = { 0, 1, 2, 0, 2, 3 };
-    u32 CubeIndexes[] =
-    {
-        0, 1, 2, 0, 2, 3,
-        4, 5, 6, 4, 6, 7,
-    };
-    ctk::Push(&QuadMesh->Vertexes, { { 0.0f,  0.0f, 0.0f }, {}, { 0.0f, 1.0f } });
-    ctk::Push(&QuadMesh->Vertexes, { { 1.0f,  0.0f, 0.0f }, {}, { 1.0f, 1.0f } });
-    ctk::Push(&QuadMesh->Vertexes, { { 1.0f, -1.0f, 0.0f }, {}, { 1.0f, 0.0f } });
-    ctk::Push(&QuadMesh->Vertexes, { { 0.0f, -1.0f, 0.0f }, {}, { 0.0f, 0.0f } });
-    ctk::Push(&QuadMesh->Indexes, QuadIndexes, CTK_ARRAY_COUNT(QuadIndexes));
-    ctk::Push(&CubeMesh->Vertexes, { { 0.0f,  0.0f, 0.0f }, {}, { 0.0f, 1.0f } });
-    ctk::Push(&CubeMesh->Vertexes, { { 1.0f,  0.0f, 0.0f }, {}, { 1.0f, 1.0f } });
-    ctk::Push(&CubeMesh->Vertexes, { { 1.0f, -1.0f, 0.0f }, {}, { 1.0f, 0.0f } });
-    ctk::Push(&CubeMesh->Vertexes, { { 0.0f, -1.0f, 0.0f }, {}, { 0.0f, 0.0f } });
-    ctk::Push(&CubeMesh->Vertexes, { { 0.0f,  0.0f, 1.0f }, {}, { 0.0f, 1.0f } });
-    ctk::Push(&CubeMesh->Vertexes, { { 0.0f,  0.0f, 0.0f }, {}, { 1.0f, 1.0f } });
-    ctk::Push(&CubeMesh->Vertexes, { { 0.0f, -1.0f, 0.0f }, {}, { 1.0f, 0.0f } });
-    ctk::Push(&CubeMesh->Vertexes, { { 0.0f, -1.0f, 1.0f }, {}, { 0.0f, 0.0f } });
-    ctk::Push(&CubeMesh->Indexes, CubeIndexes, CTK_ARRAY_COUNT(CubeIndexes));
-    for(u32 MeshIndex = 0; MeshIndex < CTK_ARRAY_COUNT(Meshes); ++MeshIndex)
-    {
-        gfx::mesh *Mesh = Meshes + MeshIndex;
-        u32 VertexByteCount = ctk::ByteCount(&Mesh->Vertexes);
-        u32 IndexByteCount = ctk::ByteCount(&Mesh->Indexes);
-        Mesh->VertexRegion = vtk::AllocateRegion(DeviceBuffer, VertexByteCount);
-        Mesh->IndexRegion = vtk::AllocateRegion(DeviceBuffer, IndexByteCount);
-        vtk::WriteToDeviceRegion(Device, *GraphicsCommandPool, StagingRegion, &Mesh->VertexRegion,
-                                 Mesh->Vertexes.Data, VertexByteCount, 0);
-        vtk::WriteToDeviceRegion(Device, *GraphicsCommandPool, StagingRegion, &Mesh->IndexRegion,
-                                 Mesh->Indexes.Data, IndexByteCount, 0);
-    }
 
     ////////////////////////////////////////////////////////////
     /// Scene
     ////////////////////////////////////////////////////////////
+    ctk::smap<vtk::descriptor_set, 4> *DescriptorSets = &VulkanState->DescriptorSets;
+    ctk::smap<vtk::graphics_pipeline, 4> *GraphicsPipelines = &VulkanState->GraphicsPipelines;
     ctk::sarray<render_entity, 4> RenderEntities = {};
     render_entity *QuadEntity = ctk::Push(&RenderEntities);
     ctk::Push(&QuadEntity->DescriptorSets, At(DescriptorSets, "entity"));
     ctk::Push(&QuadEntity->DescriptorSets, At(DescriptorSets, "grass_texture"));
     QuadEntity->GraphicsPipeline = ctk::At(GraphicsPipelines, "default");
-    QuadEntity->Mesh = QuadMesh;
+    QuadEntity->Mesh = ctk::At(&Assets->Meshes, "quad");
 
     render_entity *CubeEntity = ctk::Push(&RenderEntities);
     ctk::Push(&CubeEntity->DescriptorSets, At(DescriptorSets, "entity"));
-    ctk::Push(&CubeEntity->DescriptorSets, At(DescriptorSets, "dirt_texture"));
+    ctk::Push(&CubeEntity->DescriptorSets, At(DescriptorSets, "grass_cube_texture"));
     CubeEntity->GraphicsPipeline = ctk::At(GraphicsPipelines, "default");
-    CubeEntity->Mesh = CubeMesh;
+    CubeEntity->Mesh = ctk::At(&Assets->Meshes, "cube");
+
+    glm::vec3 CameraPosition = { 0.0f, 0.0f, -1.0f };
+    glm::vec3 CameraRotation = { 0.0f, 0.0f, 0.0f };
+    glm::vec3 EntityPositions[2] =
+    {
+        { 0.0f, 0.0f, 0.0f },
+        { 0.0f, 0.0f, 2.0f },
+    };
 
     ////////////////////////////////////////////////////////////
     /// Record render pass.
@@ -110,7 +70,7 @@ main()
         VkRenderPassBeginInfo RenderPassBeginInfo = {};
         RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         RenderPassBeginInfo.renderPass = RenderPass->Handle;
-        RenderPassBeginInfo.framebuffer = *At(Framebuffers, FrameIndex);
+        RenderPassBeginInfo.framebuffer = *At(&VulkanInstance->Framebuffers, FrameIndex);
         RenderPassBeginInfo.renderArea = RenderArea;
         RenderPassBeginInfo.clearValueCount = RenderPass->ClearValues.Count;
         RenderPassBeginInfo.pClearValues = RenderPass->ClearValues.Data;
@@ -149,13 +109,6 @@ main()
     /// Main Loop
     ////////////////////////////////////////////////////////////
     b32 Close = false;
-    glm::vec3 CameraPosition = { 0.0f, 0.0f, -1.0f };
-    glm::vec3 CameraRotation = { 0.0f, 0.0f, 0.0f };
-    glm::vec3 EntityPositions[2] =
-    {
-        { 0.0f, 0.0f, 1.0f },
-        { 0.0f, 0.0f, 3.0f },
-    };
     while(!glfwWindowShouldClose(Window->Handle) && !Close)
     {
         ////////////////////////////////////////////////////////////
@@ -262,8 +215,10 @@ main()
             EntityUBOs[EntityIndex].ModelMatrix = ModelMatrix;
             EntityUBOs[EntityIndex].MVPMatrix = ProjectionMatrix * ViewMatrix * ModelMatrix;
         }
-        vtk::WriteToHostRegion(Device->Logical, ctk::At(UniformBuffers, "entity")->Regions + FrameState->CurrentFrameIndex,
-                               EntityUBOs, sizeof(EntityUBOs), 0);
+
+        // Write all entity ubos to current frame's entity uniform buffer region.
+        vtk::region *EntityUniformBufferRegion = ctk::At(&VulkanState->UniformBuffers, "entity")->Regions + FrameState->CurrentFrameIndex;
+        vtk::WriteToHostRegion(Device->Logical, EntityUniformBufferRegion, EntityUBOs, sizeof(EntityUBOs), 0);
 
         ////////////////////////////////////////////////////////////
         /// Rendering

@@ -13,177 +13,125 @@ namespace gfx {
 /// Internal
 ////////////////////////////////////////////////////////////
 static void
-ErrorCallback(s32 Error, cstr Description)
+error_callback(s32 Error, cstr Description)
 {
     CTK_FATAL("[%d] %s", Error, Description)
 }
 
 static void
-KeyCallback(GLFWwindow *Window, s32 Key, s32 Scancode, s32 Action, s32 Mods)
+key_callback(GLFWwindow *Window, s32 Key, s32 Scancode, s32 Action, s32 Mods)
 {
     auto InputState = (input_state *)glfwGetWindowUserPointer(Window);
     InputState->KeyDown[Key] = Action == GLFW_PRESS || Action == GLFW_REPEAT;
 }
 
 static void
-MouseButtonCallback(GLFWwindow *Window, s32 button, s32 Action, s32 Mods)
+mouse_button_callback(GLFWwindow *Window, s32 button, s32 Action, s32 Mods)
 {
     auto InputState = (input_state *)glfwGetWindowUserPointer(Window);
     InputState->MouseButtonDown[button] = Action == GLFW_PRESS || Action == GLFW_REPEAT;
 }
 
-// static model
-// LoadModel(cstr Path)
-// {
-//     model Model = {};
-//     u32 ProcessingFlags = aiProcess_CalcTangentSpace |
-//                           aiProcess_Triangulate |
-//                           aiProcess_JoinIdenticalVertices |
-//                           aiProcess_SortByPType;
-//     const aiScene *Scene = aiImportFile(Path, ProcessingFlags);
-//     if(Scene == NULL || Scene->mRootNode == NULL || Scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE)
-//     {
-//         CTK_FATAL("error loading model from path \"%s\": %s", Path, aiGetErrorString())
-//     }
+static mesh
+create_mesh(vulkan_instance *VulkanInstance, cstr Path)
+{
+    mesh Mesh = {};
 
-//     // HACK: Bake all meshes from model file into single mesh object.
-//     ////////////////////////////////////////////////////////////
-//     /// Allocation
-//     ////////////////////////////////////////////////////////////
-//     u32 VertexCount = 0;
-//     u32 IndexCount = 0;
-//     for(u32 MeshIndex = 0; MeshIndex < Scene->mNumMeshes; ++MeshIndex)
-//     {
-//         aiMesh *Mesh = Scene->mMeshes[MeshIndex];
-//         VertexCount += Mesh->mNumVertices;
-//         for(u32 FaceIndex = 0; FaceIndex < Mesh->mNumFaces; ++FaceIndex)
-//         {
-//             IndexCount += Mesh->mFaces[FaceIndex].mNumIndices;
-//         }
-//     }
-//     Model.Vertexes = ctk::CreateArrayEmpty<vertex>(VertexCount);
-//     Model.Indexes = ctk::CreateArrayEmpty<u32>(IndexCount);
+    vtk::device *Device = &VulkanInstance->Device;
+    VkCommandPool GraphicsCommandPool = VulkanInstance->GraphicsCommandPool;
+    vtk::buffer *DeviceBuffer = &VulkanInstance->DeviceBuffer;
+    vtk::region *StagingRegion = &VulkanInstance->StagingRegion;
 
-//     ////////////////////////////////////////////////////////////
-//     /// Processing
-//     ////////////////////////////////////////////////////////////
-//     for(u32 MeshIndex = 0; MeshIndex < Scene->mNumMeshes; ++MeshIndex)
-//     {
-//         aiMesh *Mesh = Scene->mMeshes[MeshIndex];
-//         u32 IndexBase = Model.Vertexes.Count;
-//         for(u32 vertex_index = 0; vertex_index < Mesh->mNumVertices; ++vertex_index)
-//         {
-//             vertex *Vertex = ctk::Push(&Model.Vertexes);
-//             aiVector3D *Position = Mesh->mVertices + vertex_index;
-//             aiVector3D *Normal = Mesh->mNormals + vertex_index;
-//             Vertex->Position = { Position->x, Position->y, Position->z };
-//             Vertex->Normal = { Normal->x, Normal->y, Normal->z };
+    u32 ProcessingFlags = aiProcess_CalcTangentSpace |
+                          aiProcess_Triangulate |
+                          aiProcess_JoinIdenticalVertices |
+                          aiProcess_SortByPType;
+    const aiScene *Scene = aiImportFile(Path, ProcessingFlags);
+    if(Scene == NULL || Scene->mRootNode == NULL || Scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE)
+    {
+        CTK_FATAL("error loading mesh from path \"%s\": %s", Path, aiGetErrorString())
+    }
 
-//             // Texture coordinates are optional.
-//             if(Mesh->mTextureCoords[0] == NULL)
-//             {
-//                 Vertex->UV = { 0, 0 };
-//             }
-//             else
-//             {
-//                 aiVector3D *UV = Mesh->mTextureCoords[0] + vertex_index;
-//                 Vertex->UV = { UV->x, UV->y };
-//             }
-//         }
-//         for(u32 FaceIndex = 0; FaceIndex < Mesh->mNumFaces; ++FaceIndex)
-//         {
-//             aiFace *Face = Mesh->mFaces + FaceIndex;
-//             for(u32 IndexIndex = 0; IndexIndex < Face->mNumIndices; ++IndexIndex)
-//             {
-//                 ctk::Push(&Model.Indexes, IndexBase + Face->mIndices[IndexIndex]);
-//             }
-//         }
-//     }
+    ////////////////////////////////////////////////////////////
+    /// Allocation
+    ////////////////////////////////////////////////////////////
+    ctk::Todo("HACK: Baking all meshes from file into single mesh.");
+    u32 VertexCount = 0;
+    u32 IndexCount = 0;
+    for(u32 MeshIndex = 0; MeshIndex < Scene->mNumMeshes; ++MeshIndex)
+    {
+        aiMesh *Mesh = Scene->mMeshes[MeshIndex];
+        VertexCount += Mesh->mNumVertices;
+        for(u32 FaceIndex = 0; FaceIndex < Mesh->mNumFaces; ++FaceIndex)
+        {
+            IndexCount += Mesh->mFaces[FaceIndex].mNumIndices;
+        }
+    }
+    Mesh.Vertexes = ctk::CreateArrayEmpty<vertex>(VertexCount);
+    Mesh.Indexes = ctk::CreateArrayEmpty<u32>(IndexCount);
 
-//     // Cleanup
-//     aiReleaseImport(Scene);
+    ////////////////////////////////////////////////////////////
+    /// Processing
+    ////////////////////////////////////////////////////////////
+    for(u32 MeshIndex = 0; MeshIndex < Scene->mNumMeshes; ++MeshIndex)
+    {
+        aiMesh *SceneMesh = Scene->mMeshes[MeshIndex];
+        u32 IndexBase = Mesh.Vertexes.Count;
+        for(u32 vertex_index = 0; vertex_index < SceneMesh->mNumVertices; ++vertex_index)
+        {
+            vertex *Vertex = ctk::Push(&Mesh.Vertexes);
+            aiVector3D *Position = SceneMesh->mVertices + vertex_index;
+            aiVector3D *Normal = SceneMesh->mNormals + vertex_index;
+            Vertex->Position = { Position->x, Position->y, Position->z };
+            Vertex->Normal = { Normal->x, Normal->y, Normal->z };
 
-//     return Model;
-// }
+            // Texture coordinates are optional.
+            if(SceneMesh->mTextureCoords[0] == NULL)
+            {
+                Vertex->UV = { 0, 0 };
+            }
+            else
+            {
+                aiVector3D *UV = SceneMesh->mTextureCoords[0] + vertex_index;
+                Vertex->UV = { UV->x, -UV->y };
+            }
+        }
+        for(u32 FaceIndex = 0; FaceIndex < SceneMesh->mNumFaces; ++FaceIndex)
+        {
+            aiFace *Face = SceneMesh->mFaces + FaceIndex;
+            for(u32 IndexIndex = 0; IndexIndex < Face->mNumIndices; ++IndexIndex)
+            {
+                ctk::Push(&Mesh.Indexes, IndexBase + Face->mIndices[IndexIndex]);
+            }
+        }
+    }
 
-// static void
-// Free(model *Model)
-// {
-//     ctk::Free(&Model->Vertexes);
-//     ctk::Free(&Model->Indexes);
-// }
+    // Allocate and write vertex/index data to their associated regions.
+    u32 VertexByteSize = ctk::ByteSize(&Mesh.Vertexes);
+    u32 IndexByteSize = ctk::ByteSize(&Mesh.Indexes);
+    Mesh.VertexRegion = vtk::AllocateRegion(DeviceBuffer, VertexByteSize);
+    Mesh.IndexRegion = vtk::AllocateRegion(DeviceBuffer, IndexByteSize);
+    vtk::WriteToDeviceRegion(Device, GraphicsCommandPool, StagingRegion, &Mesh.VertexRegion,
+                             Mesh.Vertexes.Data, VertexByteSize, 0);
+    vtk::WriteToDeviceRegion(Device, GraphicsCommandPool, StagingRegion, &Mesh.IndexRegion,
+                             Mesh.Indexes.Data, IndexByteSize, 0);
 
-// static void
-// LoadModels(graphics_state *GraphicsState, ctk::data *Data)
-// {
-//     // Load models.
-//     ctk::smap<model, 64> Models = {};
-//     u32 ModelCount = ModelDataArray->Children.Count;
-//     CTK_ASSERT(ModelCount <= Models.Size)
-//     u32 TotalVertexCount = 0;
-//     u32 TotalIndexCount = 0;
-//     char FullPath[64] = {};
-//     static cstr BASE_DIRECTORY = "assets/models";
-//     for(u32 ModelIndex = 0; ModelIndex < ModelCount; ++ModelIndex)
-//     {
-//         cstr ModelName = ctk::CStr(Data, ModelIndex);
-//         sprintf(FullPath, "%s/%s.obj", BASE_DIRECTORY, ModelName);
-//         model *Model = ctk::Push(&Models, ModelName, LoadModel(FullPath));
-//         TotalVertexCount += Model->Vertexes.Count;
-//         TotalIndexCount += Model->Indexes.Count;
-//     }
+    // Cleanup
+    aiReleaseImport(Scene);
 
-//     // Allocate regions in device buffer for storing vertex and index data.
-//     GraphicsState->VertexRegion = vtk::AllocateRegion(&GraphicsState->DeviceBuffer, TotalVertexCount, sizeof(vertex));
-//     GraphicsState->IndexRegion = vtk::AllocateRegion(&GraphicsState->DeviceBuffer, TotalIndexCount, sizeof(u32));
-
-//     // Generate references to vertex and index data for each model for rendering.
-//     GraphicsState->MeshRegions = ctk::CreateMap<mesh_region>(ModelCount);
-//     u32 VertexOffset = 0;
-//     u32 IndexOffset = 0;
-//     for(u32 ModelIndex = 0; ModelIndex < Models.Count; ++ModelIndex)
-//     {
-//         cstr ModelKey = Models.Keys[ModelIndex];
-//         model *Model = ctk::At(&Models, ModelKey);
-//         u32 ModelVertexesByteSize = ctk::ByteCount(&Model->Vertexes);
-//         u32 ModelIndexesByteSize = ctk::ByteCount(&Model->Indexes);
-//         mesh_region *MeshRegion = ctk::Push(&GraphicsState->MeshRegions, ModelKey);
-//         MeshRegion->VertexesOffset = VertexOffset;
-//         MeshRegion->IndexesOffset = IndexOffset;
-//         MeshRegion->IndexCount = Model->Indexes.Count;
-//         VertexOffset += ModelVertexesByteSize;
-//         IndexOffset += ModelIndexesByteSize;
-//         vtk::WriteToDeviceRegion(&GraphicsState->Device, GraphicsState->GraphicsCommandPool, &GraphicsState->StagingRegion, &GraphicsState->VertexRegion,
-//                                  Model->Vertexes.Data, ModelVertexesByteSize, MeshRegion->VertexesOffset);
-//         vtk::WriteToDeviceRegion(&GraphicsState->Device, GraphicsState->GraphicsCommandPool, &GraphicsState->StagingRegion, &GraphicsState->IndexRegion,
-//                                  Model->Indexes.Data, ModelIndexesByteSize, MeshRegion->IndexesOffset);
-//     }
-
-//     // ctk::Info("mesh regions:");
-//     // for(u32 Index = 0; Index < GraphicsState->MeshRegions.Count; ++Index)
-//     // {
-//     //     mesh_region *MeshRegion = GraphicsState->MeshRegions.Values + Index;
-//     //     ctk::Info(1, "[%u] %s: VertexesOffset=%u IndexesOffset=%u IndexCount=%u",
-//     //               Index, GraphicsState->MeshRegions.Keys + Index, MeshRegion->VertexesOffset, MeshRegion->IndexesOffset, MeshRegion->IndexCount);
-//     // }
-
-//     // Cleanup
-//     for(model *Model = Models.Values; Model < Models.Values + Models.Count; ++Model)
-//     {
-//         Free(Model);
-//     }
-// }
+    return Mesh;
+}
 
 ////////////////////////////////////////////////////////////
 /// Interface
 ////////////////////////////////////////////////////////////
 window *
-CreateWindow_(input_state *InputState)
+create_window(input_state *InputState)
 {
     window *Window = ctk::Alloc<window>();
     *Window = {};
     ctk::data Data = ctk::LoadData("assets/data/window.ctkd");
-    glfwSetErrorCallback(ErrorCallback);
+    glfwSetErrorCallback(error_callback);
     if(glfwInit() != GLFW_TRUE)
     {
         CTK_FATAL("failed to init GLFW")
@@ -200,13 +148,13 @@ CreateWindow_(input_state *InputState)
     glfwSetWindowPos(Window->Handle, S32(&Data, "x"), S32(&Data, "y"));
     glfwSetWindowUserPointer(Window->Handle, (void *)InputState);
     // glfwSetFramebufferSizeCallback(Window->Handle, FramebufferResizeCallback);
-    glfwSetKeyCallback(Window->Handle, KeyCallback);
-    glfwSetMouseButtonCallback(Window->Handle, MouseButtonCallback);
+    glfwSetKeyCallback(Window->Handle, key_callback);
+    glfwSetMouseButtonCallback(Window->Handle, mouse_button_callback);
     return Window;
 }
 
 vulkan_instance *
-CreateVulkanInstance(window *Window)
+create_vulkan_instance(window *Window)
 {
     vulkan_instance *VulkanInstance = ctk::Alloc<vulkan_instance>();
     *VulkanInstance = {};
@@ -332,25 +280,25 @@ CreateVulkanInstance(window *Window)
 
     // Buffers
     vtk::buffer_info HostBufferInfo = {};
-    HostBufferInfo.Size = 10 * MEGABYTE;
+    HostBufferInfo.Size = 10 * CTK_MEGABYTE;
     HostBufferInfo.UsageFlags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     HostBufferInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     *HostBuffer = vtk::CreateBuffer(Device, &HostBufferInfo);
 
     vtk::buffer_info DeviceBufferInfo = {};
-    DeviceBufferInfo.Size = 10 * MEGABYTE;
+    DeviceBufferInfo.Size = 10 * CTK_MEGABYTE;
     DeviceBufferInfo.UsageFlags = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     DeviceBufferInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     VulkanInstance->DeviceBuffer = vtk::CreateBuffer(Device, &DeviceBufferInfo);
 
     // Regions
-    VulkanInstance->StagingRegion = vtk::AllocateRegion(HostBuffer, 2 * MEGABYTE);
+    VulkanInstance->StagingRegion = vtk::AllocateRegion(HostBuffer, 2 * CTK_MEGABYTE);
 
     return VulkanInstance;
 }
 
 assets *
-CreateAssets(vulkan_instance *VulkanInstance)
+create_assets(vulkan_instance *VulkanInstance)
 {
     assets *Assets = ctk::Alloc<assets>();
     *Assets = {};
@@ -370,8 +318,8 @@ CreateAssets(vulkan_instance *VulkanInstance)
         vtk::texture_info TextureInfo = {};
         TextureInfo.Filter = vtk::GetVkFilter(ctk::CStr(TextureData, "filter"));
         ctk::Push(&Assets->Textures, TextureData->Key.Data,
-                  vtk::LoadTexture(Device, VulkanInstance->GraphicsCommandPool, &VulkanInstance->StagingRegion,
-                                   ctk::CStr(TextureData, "path"), &TextureInfo));
+                  vtk::CreateTexture(Device, VulkanInstance->GraphicsCommandPool, &VulkanInstance->StagingRegion,
+                                     ctk::CStr(TextureData, "path"), &TextureInfo));
     }
 
     ////////////////////////////////////////////////////////////
@@ -389,13 +337,18 @@ CreateAssets(vulkan_instance *VulkanInstance)
     ////////////////////////////////////////////////////////////
     /// Meshes
     ////////////////////////////////////////////////////////////
-
+    ctk::data *ModelMap = ctk::At(&AssetData, "models");
+    for(u32 ModelIndex = 0; ModelIndex < ModelMap->Children.Count; ++ModelIndex)
+    {
+        ctk::data *ModelData = ctk::At(ModelMap, ModelIndex);
+        ctk::Push(&Assets->Meshes, ModelData->Key.Data, create_mesh(VulkanInstance, ctk::CStr(ModelData, "path")));
+    }
 
     return Assets;
 }
 
 vulkan_state *
-CreateVulkanState(vulkan_instance *VulkanInstance, assets *Assets)
+create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
 {
     vulkan_state *VulkanState = ctk::Alloc<vulkan_state>();
     *VulkanState = {};

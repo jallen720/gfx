@@ -10,6 +10,11 @@ textures
         path assets/textures/dirt.jpg
         filter VK_FILTER_NEAREST
     }
+    grass_cube
+    {
+        path assets/textures/grass_cube.png
+        filter VK_FILTER_NEAREST
+    }
 }
 shader_modules
 {
