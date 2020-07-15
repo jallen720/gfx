@@ -77,11 +77,11 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
     {
         aiMesh *SceneMesh = Scene->mMeshes[MeshIndex];
         u32 IndexBase = Mesh.Vertexes.Count;
-        for(u32 vertex_index = 0; vertex_index < SceneMesh->mNumVertices; ++vertex_index)
+        for(u32 VertexIndex = 0; VertexIndex < SceneMesh->mNumVertices; ++VertexIndex)
         {
             vertex *Vertex = ctk::Push(&Mesh.Vertexes);
-            aiVector3D *Position = SceneMesh->mVertices + vertex_index;
-            aiVector3D *Normal = SceneMesh->mNormals + vertex_index;
+            aiVector3D *Position = SceneMesh->mVertices + VertexIndex;
+            aiVector3D *Normal = SceneMesh->mNormals + VertexIndex;
             Vertex->Position = { Position->x, Position->y, Position->z };
             Vertex->Normal = { Normal->x, Normal->y, Normal->z };
 
@@ -92,8 +92,8 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
             }
             else
             {
-                aiVector3D *UV = SceneMesh->mTextureCoords[0] + vertex_index;
-                Vertex->UV = { UV->x, -UV->y };
+                aiVector3D *UV = SceneMesh->mTextureCoords[0] + VertexIndex;
+                Vertex->UV = { UV->x, -UV->y }; // Blender's UV y-axis is inverse from Vulkan's.
             }
         }
         for(u32 FaceIndex = 0; FaceIndex < SceneMesh->mNumFaces; ++FaceIndex)
@@ -187,7 +187,7 @@ create_vulkan_instance(window *Window)
 
     // Device
     vtk::device_info DeviceInfo = {};
-    Push(&DeviceInfo.Extensions, VK_KHR_SWAPCHAIN_EXTENSION_NAME); // Swapchains required for rendering.
+    ctk::Push(&DeviceInfo.Extensions, VK_KHR_SWAPCHAIN_EXTENSION_NAME); // Swapchains required for rendering.
     DeviceInfo.Features.geometryShader = VK_TRUE;
     DeviceInfo.Features.samplerAnisotropy = VK_TRUE;
     // DeviceInfo.Features.vertexPipelineStoresAndAtomics = VK_TRUE;
