@@ -15,15 +15,15 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="gfx.cc">
+    <ClCompile Include="main.cc">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="main.cc">
+    <ClCompile Include="graphics.cc">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="gfx.h">
+    <ClInclude Include="graphics.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>
