@@ -61,7 +61,7 @@ load_transform(ctk::data *Data)
 }
 
 static scene *
-load_scene(gfx_vulkan_state *VulkanState, gfx_assets *Assets, cstr Path)
+create_scene(gfx_vulkan_state *VulkanState, gfx_assets *Assets, cstr Path)
 {
     scene *Scene = ctk::Alloc<scene>();
     *Scene = {};
@@ -366,7 +366,7 @@ main()
     gfx_assets *Assets = gfx_create_assets(VulkanInstance);
     gfx_vulkan_state *VulkanState = gfx_create_vulkan_state(VulkanInstance, Assets);
 
-    scene *Scene = load_scene(VulkanState, Assets, "assets/scenes/test_scene.ctkd");
+    scene *Scene = create_scene(VulkanState, Assets, "assets/scenes/test_scene.ctkd");
     record_render_pass(VulkanInstance, Scene);
     while(!glfwWindowShouldClose(Window->Handle))
     {
