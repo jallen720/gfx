@@ -131,7 +131,9 @@ record_render_pass(gfx_vulkan_instance *VulkanInstance, scene *Scene)
         // Begin
         vkCmdBeginRenderPass(CommandBuffer, &RenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        // Render Commands
+        ////////////////////////////////////////////////////////////
+        /// Render Commands
+        ////////////////////////////////////////////////////////////
         for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex)
         {
             entity *Entity = Scene->Entities.Values + EntityIndex;
@@ -156,6 +158,50 @@ record_render_pass(gfx_vulkan_instance *VulkanInstance, scene *Scene)
         // End
         vkCmdEndRenderPass(CommandBuffer);
         vtk::ValidateVkResult(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
+
+        ////////////////////////////////////////////////////////////
+        /// Image Copy
+        ////////////////////////////////////////////////////////////
+        VkImage RenderPassImage = VulkanInstance->RenderPassImages[FrameIndex].Handle;
+        VkImage SwapchainImage = Swapchain->Images[FrameIndex].Handle;
+        VkCommandBuffer ImageCopyCommandBuffer = *At(&VulkanInstance->ImageCopyCommandBuffers, FrameIndex);
+
+        VkImageCopy ImageCopyRegion = {};
+        ImageCopyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        ImageCopyRegion.srcSubresource.layerCount = 1;
+        ImageCopyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        ImageCopyRegion.dstSubresource.layerCount = 1;
+        ImageCopyRegion.extent.width = Swapchain->Extent.width;
+        ImageCopyRegion.extent.height = Swapchain->Extent.height;
+        ImageCopyRegion.extent.depth = 1;
+
+        vkBeginCommandBuffer(ImageCopyCommandBuffer, &CommandBufferBeginInfo);
+            // Pre-copy Memory Barriers
+            vtk::InsertImageMemoryBarrier(ImageCopyCommandBuffer, RenderPassImage, VK_IMAGE_ASPECT_COLOR_BIT,
+                                          { VK_ACCESS_MEMORY_READ_BIT, VK_ACCESS_TRANSFER_READ_BIT },
+                                          { VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL },
+                                          { VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT });
+            vtk::InsertImageMemoryBarrier(ImageCopyCommandBuffer, SwapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
+                                          { 0, VK_ACCESS_TRANSFER_WRITE_BIT },
+                                          { VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL },
+                                          { VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT });
+
+            vkCmdCopyImage(ImageCopyCommandBuffer,
+                           RenderPassImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           SwapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1, &ImageCopyRegion);
+
+            // Post-copy Memory Barriers
+            vtk::InsertImageMemoryBarrier(ImageCopyCommandBuffer, RenderPassImage, VK_IMAGE_ASPECT_COLOR_BIT,
+                                          { VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_MEMORY_READ_BIT },
+                                          { VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL },
+                                          { VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT });
+            vtk::InsertImageMemoryBarrier(ImageCopyCommandBuffer, SwapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
+                                          { VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT },
+                                          { VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR },
+                                          { VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT });
+        vtk::ValidateVkResult(vkEndCommandBuffer(ImageCopyCommandBuffer),
+                              "vkEndCommandBuffer", "error during image copy command recording");
     }
 }
 
@@ -312,7 +358,11 @@ render(gfx_vulkan_instance *VulkanInstance)
     VkSemaphore QueueSubmitWaitSemaphores[] = { CurrentFrame->ImageAquiredSemaphore };
     VkPipelineStageFlags QueueSubmitWaitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
     VkSemaphore QueueSubmitSignalSemaphores[] = { CurrentFrame->RenderFinishedSemaphore };
-    VkCommandBuffer QueueSubmitCommandBuffers[] = { *At(&VulkanInstance->RenderPass.CommandBuffers, SwapchainImageIndex) };
+    VkCommandBuffer QueueSubmitCommandBuffers[] =
+    {
+        *At(&VulkanInstance->RenderPass.CommandBuffers, SwapchainImageIndex),
+        *At(&VulkanInstance->ImageCopyCommandBuffers, SwapchainImageIndex),
+    };
 
     VkSubmitInfo SubmitInfos[1] = {};
     SubmitInfos[0].sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;

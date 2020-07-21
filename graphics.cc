@@ -188,11 +188,16 @@ gfx_create_vulkan_instance(gfx_window *Window)
     // DeviceInfo.Features.vertexPipelineStoresAndAtomics = VK_TRUE;
     *Device = vtk::CreateDevice(Instance->Handle, *PlatformSurface, &DeviceInfo);
 
-    // Swapchain
-    *Swapchain = vtk::CreateSwapchain(Device, *PlatformSurface);
-
     // Graphics Command Pool
     *GraphicsCommandPool = vtk::CreateCommandPool(Device->Logical, Device->QueueFamilyIndexes.Graphics);
+
+    // Swapchain
+    *Swapchain = vtk::CreateSwapchain(Device, *PlatformSurface);
+    for(u32 i = 0; i < Swapchain->Images.Count; ++i)
+    {
+        TransitionImageLayout(Device, *GraphicsCommandPool, Swapchain->Images + i,
+                              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    }
 
     // Frame State
     VulkanInstance->FrameState = vtk::CreateFrameState(Device->Logical, 2, Swapchain->Images.Count);
@@ -225,7 +230,7 @@ gfx_create_vulkan_instance(gfx_window *Window)
     ColorAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; // Not currently relevant.
     ColorAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // Not currently relevant.
     ColorAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; // Image layout before render pass.
-    ColorAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    ColorAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
     ColorAttachment->ClearValue = { 0.04f, 0.04f, 0.04f, 1.0f };
 
     u32 DepthAttachmentIndex = RenderPassInfo.Attachments.Count;
@@ -251,11 +256,28 @@ gfx_create_vulkan_instance(gfx_window *Window)
     Subpass->DepthAttachmentReference.Value.attachment = DepthAttachmentIndex;
     Subpass->DepthAttachmentReference.Value.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+    CTK_REPEAT(Swapchain->Images.Count)
+    {
+        vtk::image_info ImageInfo = {};
+        ImageInfo.Width = Swapchain->Extent.width;
+        ImageInfo.Height = Swapchain->Extent.height;
+        ImageInfo.Format = Swapchain->ImageFormat;
+        ImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
+        ImageInfo.UsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        ImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+        ImageInfo.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        ctk::Push(&VulkanInstance->RenderPassImages, vtk::CreateImage(Device, &ImageInfo));
+    }
+    VulkanInstance->ImageCopyCommandBuffers.Count = Swapchain->Images.Count;
+    vtk::AllocateCommandBuffers(Device->Logical, *GraphicsCommandPool, Swapchain->Images.Count,
+                                VulkanInstance->ImageCopyCommandBuffers.Data);
+
     // Framebuffer Infos
     for(u32 FramebufferIndex = 0; FramebufferIndex < Swapchain->Images.Count; ++FramebufferIndex)
     {
         vtk::framebuffer_info *FramebufferInfo = ctk::Push(&RenderPassInfo.FramebufferInfos);
-        ctk::Push(&FramebufferInfo->Attachments, Swapchain->Images[FramebufferIndex].View);
+        ctk::Push(&FramebufferInfo->Attachments, VulkanInstance->RenderPassImages[FramebufferIndex].View);
+        // ctk::Push(&FramebufferInfo->Attachments, Swapchain->Images[FramebufferIndex].View);
         ctk::Push(&FramebufferInfo->Attachments, DepthImage->View);
         FramebufferInfo->Extent = Swapchain->Extent;
         FramebufferInfo->Layers = 1;
@@ -360,6 +382,8 @@ gfx_create_vulkan_state(gfx_vulkan_instance *VulkanInstance, gfx_assets *Assets)
     ////////////////////////////////////////////////////////////
     ctk::Push(UniformBuffers, "entity",
               vtk::CreateUniformBuffer(&VulkanInstance->HostBuffer, 64, sizeof(gfx_entity_ubo), FrameState->Frames.Count));
+    ctk::Push(UniformBuffers, "light",
+              vtk::CreateUniformBuffer(&VulkanInstance->HostBuffer, 64, sizeof(gfx_light_ubo), FrameState->Frames.Count));
 
     ////////////////////////////////////////////////////////////
     /// Descriptor Sets

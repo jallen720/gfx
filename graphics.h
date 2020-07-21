@@ -48,6 +48,8 @@ struct gfx_vulkan_instance
     vtk::buffer HostBuffer;
     vtk::buffer DeviceBuffer;
     vtk::region StagingRegion;
+    ctk::sarray<vtk::image, 4> RenderPassImages;
+    ctk::sarray<VkCommandBuffer, 4> ImageCopyCommandBuffers;
 };
 
 struct gfx_vertex
@@ -86,6 +88,16 @@ struct gfx_entity_ubo
 {
     alignas(16) glm::mat4 ModelMatrix;
     alignas(16) glm::mat4 MVPMatrix;
+};
+
+struct gfx_light_ubo
+{
+    alignas(16) ctk::vec4<f32> Color;
+    alignas(16) ctk::vec3<f32> Position;
+    f32 Linear;
+    f32 Quadratic;
+    f32 Cutoff;
+    f32 OuterCutoff;
 };
 
 ////////////////////////////////////////////////////////////

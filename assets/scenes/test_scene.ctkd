@@ -10,75 +10,11 @@ camera
 }
 entities
 {
-    sibenik0
+    sibenik
     {
         transform
         {
             position [ 20 -15 12 ]
-            rotation [ 0 0 0 ]
-            scale [ 1 1 1 ]
-        }
-        descriptor_sets
-        [
-            entity
-            brick_texture
-        ]
-        graphics_pipeline default
-        mesh sibenik
-    }
-    sibenik1
-    {
-        transform
-        {
-            position [ 20 -15 32 ]
-            rotation [ 0 0 0 ]
-            scale [ 1 1 1 ]
-        }
-        descriptor_sets
-        [
-            entity
-            brick_texture
-        ]
-        graphics_pipeline default
-        mesh sibenik
-    }
-    sibenik2
-    {
-        transform
-        {
-            position [ 20 -15 52 ]
-            rotation [ 0 0 0 ]
-            scale [ 1 1 1 ]
-        }
-        descriptor_sets
-        [
-            entity
-            brick_texture
-        ]
-        graphics_pipeline default
-        mesh sibenik
-    }
-    sibenik3
-    {
-        transform
-        {
-            position [ 20 -15 72 ]
-            rotation [ 0 0 0 ]
-            scale [ 1 1 1 ]
-        }
-        descriptor_sets
-        [
-            entity
-            brick_texture
-        ]
-        graphics_pipeline default
-        mesh sibenik
-    }
-    sibenik4
-    {
-        transform
-        {
-            position [ 20 -15 92 ]
             rotation [ 0 0 0 ]
             scale [ 1 1 1 ]
         }
