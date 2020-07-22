@@ -3,38 +3,6 @@
 #include "ctk/data.h"
 
 ////////////////////////////////////////////////////////////
-/// Data
-////////////////////////////////////////////////////////////
-struct transform
-{
-    ctk::vec3<f32> Position;
-    ctk::vec3<f32> Rotation;
-    ctk::vec3<f32> Scale;
-};
-
-struct camera
-{
-    transform Transform;
-    f32 FieldOfView;
-};
-
-struct entity
-{
-    transform Transform;
-    ctk::sarray<vtk::descriptor_set *, 4> DescriptorSets;
-    vtk::graphics_pipeline *GraphicsPipeline;
-    gfx_mesh *Mesh;
-};
-
-struct scene
-{
-    camera Camera;
-    ctk::smap<entity, 64> Entities;
-    ctk::sarray<gfx_entity_ubo, 64> EntityUBOs;
-    vtk::uniform_buffer *EntityUniformBuffer;
-};
-
-////////////////////////////////////////////////////////////
 /// Internal
 ////////////////////////////////////////////////////////////
 static ctk::vec3<f32>
@@ -61,7 +29,7 @@ load_transform(ctk::data *Data)
 }
 
 static scene *
-create_scene(gfx_vulkan_state *VulkanState, gfx_assets *Assets, cstr Path)
+create_scene(vulkan_state *VulkanState, assets *Assets, cstr Path)
 {
     scene *Scene = ctk::Alloc<scene>();
     *Scene = {};
@@ -98,114 +66,6 @@ create_scene(gfx_vulkan_state *VulkanState, gfx_assets *Assets, cstr Path)
 }
 
 static void
-record_render_pass(gfx_vulkan_instance *VulkanInstance, scene *Scene)
-{
-    vtk::device *Device = &VulkanInstance->Device;
-    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
-    vtk::frame_state *FrameState = &VulkanInstance->FrameState;
-    vtk::render_pass *RenderPass = &VulkanInstance->RenderPass;
-
-    VkRect2D RenderArea = {};
-    RenderArea.offset.x = 0;
-    RenderArea.offset.y = 0;
-    RenderArea.extent = Swapchain->Extent;
-
-    VkCommandBufferBeginInfo CommandBufferBeginInfo = {};
-    CommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    CommandBufferBeginInfo.flags = 0;
-    CommandBufferBeginInfo.pInheritanceInfo = NULL;
-
-    for(u32 FrameIndex = 0; FrameIndex < FrameState->Frames.Count; ++FrameIndex)
-    {
-        VkCommandBuffer CommandBuffer = *At(&RenderPass->CommandBuffers, FrameIndex);
-        vtk::ValidateVkResult(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
-                              "vkBeginCommandBuffer", "failed to begin recording command buffer");
-        VkRenderPassBeginInfo RenderPassBeginInfo = {};
-        RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        RenderPassBeginInfo.renderPass = RenderPass->Handle;
-        RenderPassBeginInfo.framebuffer = *At(&RenderPass->Framebuffers, FrameIndex);
-        RenderPassBeginInfo.renderArea = RenderArea;
-        RenderPassBeginInfo.clearValueCount = RenderPass->ClearValues.Count;
-        RenderPassBeginInfo.pClearValues = RenderPass->ClearValues.Data;
-
-        // Begin
-        vkCmdBeginRenderPass(CommandBuffer, &RenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        ////////////////////////////////////////////////////////////
-        /// Render Commands
-        ////////////////////////////////////////////////////////////
-        for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex)
-        {
-            entity *Entity = Scene->Entities.Values + EntityIndex;
-            gfx_mesh *Mesh = Entity->Mesh;
-
-            // Graphics Pipeline
-            vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, Entity->GraphicsPipeline->Handle);
-
-            // Descriptor Sets
-            vtk::BindDescriptorSets(CommandBuffer, Entity->GraphicsPipeline->Layout,
-                                    Entity->DescriptorSets.Data, Entity->DescriptorSets.Count,
-                                    FrameIndex, EntityIndex);
-
-            // Vertex/Index Buffers
-            vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh->VertexRegion.Buffer->Handle, &Mesh->VertexRegion.Offset);
-            vkCmdBindIndexBuffer(CommandBuffer, Mesh->IndexRegion.Buffer->Handle, Mesh->IndexRegion.Offset, VK_INDEX_TYPE_UINT32);
-
-            // Draw
-            vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
-        }
-
-        // End
-        vkCmdEndRenderPass(CommandBuffer);
-        vtk::ValidateVkResult(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
-
-        ////////////////////////////////////////////////////////////
-        /// Image Copy
-        ////////////////////////////////////////////////////////////
-        VkImage RenderPassImage = VulkanInstance->RenderPassImages[FrameIndex].Handle;
-        VkImage SwapchainImage = Swapchain->Images[FrameIndex].Handle;
-        VkCommandBuffer ImageCopyCommandBuffer = *At(&VulkanInstance->ImageCopyCommandBuffers, FrameIndex);
-
-        VkImageCopy ImageCopyRegion = {};
-        ImageCopyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        ImageCopyRegion.srcSubresource.layerCount = 1;
-        ImageCopyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        ImageCopyRegion.dstSubresource.layerCount = 1;
-        ImageCopyRegion.extent.width = Swapchain->Extent.width;
-        ImageCopyRegion.extent.height = Swapchain->Extent.height;
-        ImageCopyRegion.extent.depth = 1;
-
-        vkBeginCommandBuffer(ImageCopyCommandBuffer, &CommandBufferBeginInfo);
-            // Pre-copy Memory Barriers
-            vtk::InsertImageMemoryBarrier(ImageCopyCommandBuffer, RenderPassImage, VK_IMAGE_ASPECT_COLOR_BIT,
-                                          { VK_ACCESS_MEMORY_READ_BIT, VK_ACCESS_TRANSFER_READ_BIT },
-                                          { VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL },
-                                          { VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT });
-            vtk::InsertImageMemoryBarrier(ImageCopyCommandBuffer, SwapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
-                                          { 0, VK_ACCESS_TRANSFER_WRITE_BIT },
-                                          { VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL },
-                                          { VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT });
-
-            vkCmdCopyImage(ImageCopyCommandBuffer,
-                           RenderPassImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           SwapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                           1, &ImageCopyRegion);
-
-            // Post-copy Memory Barriers
-            vtk::InsertImageMemoryBarrier(ImageCopyCommandBuffer, RenderPassImage, VK_IMAGE_ASPECT_COLOR_BIT,
-                                          { VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_MEMORY_READ_BIT },
-                                          { VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL },
-                                          { VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT });
-            vtk::InsertImageMemoryBarrier(ImageCopyCommandBuffer, SwapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
-                                          { VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT },
-                                          { VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR },
-                                          { VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT });
-        vtk::ValidateVkResult(vkEndCommandBuffer(ImageCopyCommandBuffer),
-                              "vkEndCommandBuffer", "error during image copy command recording");
-    }
-}
-
-static void
 local_translate(transform *Transform, ctk::vec3<f32> Translation)
 {
     ctk::vec3<f32> *Position = &Transform->Position;
@@ -239,7 +99,7 @@ local_translate(transform *Transform, ctk::vec3<f32> Translation)
 }
 
 static void
-update_input_state(gfx_input_state *InputState, GLFWwindow *Window)
+update_input_state(input_state *InputState, GLFWwindow *Window)
 {
     // Mouse Delta
     ctk::vec2 PreviousMousePosition = InputState->MousePosition;
@@ -256,7 +116,7 @@ update_input_state(gfx_input_state *InputState, GLFWwindow *Window)
 }
 
 static void
-camera_controls(transform *CameraTransform, gfx_input_state *InputState)
+camera_controls(transform *CameraTransform, input_state *InputState)
 {
     // Rotation
     if(InputState->MouseButtonDown[GLFW_MOUSE_BUTTON_2])
@@ -281,140 +141,17 @@ camera_controls(transform *CameraTransform, gfx_input_state *InputState)
     local_translate(CameraTransform, Translation);
 }
 
-static void
-update_uniform_data(scene *Scene, gfx_vulkan_instance *VulkanInstance)
-{
-    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
-    transform *CameraTransform = &Scene->Camera.Transform;
-
-    // View Matrix
-    glm::vec3 CameraPosition = { CameraTransform->Position.X, CameraTransform->Position.Y, CameraTransform->Position.Z };
-    glm::mat4 CameraMatrix(1.0f);
-    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.X), { 1.0f, 0.0f, 0.0f });
-    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.Y), { 0.0f, 1.0f, 0.0f });
-    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
-    CameraMatrix = glm::translate(CameraMatrix, CameraPosition);
-    glm::vec3 CameraForward = { CameraMatrix[0][2], CameraMatrix[1][2], CameraMatrix[2][2] };
-    glm::mat4 ViewMatrix = glm::lookAt(CameraPosition, CameraPosition + CameraForward, { 0.0f, -1.0f, 0.0f });
-
-    // Projection Matrix
-    f32 Aspect = Swapchain->Extent.width / (f32)Swapchain->Extent.height;
-    glm::mat4 ProjectionMatrix = glm::perspective(glm::radians(Scene->Camera.FieldOfView), Aspect, 0.1f, 1000.0f);
-    ProjectionMatrix[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
-
-    // Entity Model Matrixes
-    for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex)
-    {
-        transform *EntityTransform = &Scene->Entities.Values[EntityIndex].Transform;
-        glm::mat4 ModelMatrix(1.0f);
-        ModelMatrix = glm::translate(ModelMatrix, { EntityTransform->Position.X, EntityTransform->Position.Y, EntityTransform->Position.Z });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.X), { 1.0f, 0.0f, 0.0f });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Y), { 0.0f, 1.0f, 0.0f });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
-        ModelMatrix = glm::scale(ModelMatrix, { EntityTransform->Scale.X, EntityTransform->Scale.Y, EntityTransform->Scale.Z });
-        Scene->EntityUBOs[EntityIndex].ModelMatrix = ModelMatrix;
-        Scene->EntityUBOs[EntityIndex].MVPMatrix = ProjectionMatrix * ViewMatrix * ModelMatrix;
-    }
-
-    // Write all entity ubos to current frame's entity uniform buffer region.
-    vtk::region *EntityUniformBufferRegion = Scene->EntityUniformBuffer->Regions + VulkanInstance->FrameState.CurrentFrameIndex;
-    vtk::WriteToHostRegion(VulkanInstance->Device.Logical, EntityUniformBufferRegion,
-                           Scene->EntityUBOs.Data, ctk::ByteCount(&Scene->EntityUBOs), 0);
-}
-
-static void
-render(gfx_vulkan_instance *VulkanInstance)
-{
-    vtk::device *Device = &VulkanInstance->Device;
-    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
-    vtk::frame_state *FrameState = &VulkanInstance->FrameState;
-    vtk::render_pass *RenderPass = &VulkanInstance->RenderPass;
-
-    vtk::frame *CurrentFrame = FrameState->Frames + FrameState->CurrentFrameIndex;
-
-    // Wait on current frame's fence if still unsignaled.
-    vkWaitForFences(Device->Logical, 1, &CurrentFrame->InFlightFence, VK_TRUE, UINT64_MAX);
-
-    // Aquire next swapchain image index, using a semaphore to signal when image is available for rendering.
-    u32 SwapchainImageIndex = VTK_UNSET_INDEX;
-    {
-        VkResult Result = vkAcquireNextImageKHR(Device->Logical, Swapchain->Handle, UINT64_MAX, CurrentFrame->ImageAquiredSemaphore,
-                                                VK_NULL_HANDLE, &SwapchainImageIndex);
-        vtk::ValidateVkResult(Result, "vkAcquireNextImageKHR", "failed to aquire next swapchain image");
-    }
-
-    // Wait on swapchain images previously associated frame fence before rendering.
-    VkFence *PreviousFrameInFlightFence = FrameState->PreviousFrameInFlightFences + SwapchainImageIndex;
-    if(*PreviousFrameInFlightFence != VK_NULL_HANDLE)
-    {
-        vkWaitForFences(Device->Logical, 1, PreviousFrameInFlightFence, VK_TRUE, UINT64_MAX);
-    }
-    vkResetFences(Device->Logical, 1, &CurrentFrame->InFlightFence);
-    *PreviousFrameInFlightFence = CurrentFrame->InFlightFence;
-
-    ////////////////////////////////////////////////////////////
-    /// Submit Render Pass Command Buffer
-    ////////////////////////////////////////////////////////////
-    VkSemaphore QueueSubmitWaitSemaphores[] = { CurrentFrame->ImageAquiredSemaphore };
-    VkPipelineStageFlags QueueSubmitWaitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    VkSemaphore QueueSubmitSignalSemaphores[] = { CurrentFrame->RenderFinishedSemaphore };
-    VkCommandBuffer QueueSubmitCommandBuffers[] =
-    {
-        *At(&VulkanInstance->RenderPass.CommandBuffers, SwapchainImageIndex),
-        *At(&VulkanInstance->ImageCopyCommandBuffers, SwapchainImageIndex),
-    };
-
-    VkSubmitInfo SubmitInfos[1] = {};
-    SubmitInfos[0].sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    SubmitInfos[0].waitSemaphoreCount = CTK_ARRAY_COUNT(QueueSubmitWaitSemaphores);
-    SubmitInfos[0].pWaitSemaphores = QueueSubmitWaitSemaphores;
-    SubmitInfos[0].pWaitDstStageMask = QueueSubmitWaitStages;
-    SubmitInfos[0].commandBufferCount = CTK_ARRAY_COUNT(QueueSubmitCommandBuffers);
-    SubmitInfos[0].pCommandBuffers = QueueSubmitCommandBuffers;
-    SubmitInfos[0].signalSemaphoreCount = CTK_ARRAY_COUNT(QueueSubmitSignalSemaphores);
-    SubmitInfos[0].pSignalSemaphores = QueueSubmitSignalSemaphores;
-
-    // Submit render pass commands to graphics queue for rendering.
-    // Signal current frame's in flight flence when commands have finished executing.
-    vtk::ValidateVkResult(vkQueueSubmit(Device->GraphicsQueue, CTK_ARRAY_COUNT(SubmitInfos), SubmitInfos, CurrentFrame->InFlightFence),
-                          "vkQueueSubmit", "failed to submit command buffer to graphics queue");
-
-    ////////////////////////////////////////////////////////////
-    /// Presentation
-    ////////////////////////////////////////////////////////////
-
-    // Provide 1:1 index per swapchain.
-    VkSwapchainKHR Swapchains[] = { Swapchain->Handle };
-    u32 SwapchainImageIndexes[] = { SwapchainImageIndex };
-
-    VkPresentInfoKHR PresentInfo = {};
-    PresentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    PresentInfo.waitSemaphoreCount = CTK_ARRAY_COUNT(QueueSubmitSignalSemaphores);
-    PresentInfo.pWaitSemaphores = QueueSubmitSignalSemaphores;
-    PresentInfo.swapchainCount = CTK_ARRAY_COUNT(Swapchains);
-    PresentInfo.pSwapchains = Swapchains;
-    PresentInfo.pImageIndices = SwapchainImageIndexes;
-    PresentInfo.pResults = NULL;
-
-    // Submit Swapchains to present queue for presentation once rendering is complete.
-    vtk::ValidateVkResult(vkQueuePresentKHR(Device->PresentQueue, &PresentInfo), "vkQueuePresentKHR",
-                          "failed to queue image for presentation");
-
-    // Cycle frame.
-    FrameState->CurrentFrameIndex = (FrameState->CurrentFrameIndex + 1) % FrameState->Frames.Count;
-}
-
 ////////////////////////////////////////////////////////////
 /// Main
 ////////////////////////////////////////////////////////////
 s32
 main()
 {
-    gfx_input_state InputState = {};
-    gfx_window *Window = gfx_create_window(&InputState);
-    gfx_vulkan_instance *VulkanInstance = gfx_create_vulkan_instance(Window);
-    gfx_assets *Assets = gfx_create_assets(VulkanInstance);
-    gfx_vulkan_state *VulkanState = gfx_create_vulkan_state(VulkanInstance, Assets);
+    input_state InputState = {};
+    window *Window = create_window(&InputState);
+    vulkan_instance *VulkanInstance = create_vulkan_instance(Window);
+    assets *Assets = create_assets(VulkanInstance);
+    vulkan_state *VulkanState = create_vulkan_state(VulkanInstance, Assets);
 
     scene *Scene = create_scene(VulkanState, Assets, "assets/scenes/test_scene.ctkd");
     record_render_pass(VulkanInstance, Scene);

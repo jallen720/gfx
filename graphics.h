@@ -20,14 +20,14 @@ static const ctk::vec2<f64> GFX_UNSET_MOUSE_POSITION = { -10000.0, -10000.0 };
 ////////////////////////////////////////////////////////////
 /// Data
 ////////////////////////////////////////////////////////////
-struct gfx_window
+struct window
 {
     GLFWwindow *Handle;
     u32 Width;
     u32 Height;
 };
 
-struct gfx_input_state
+struct input_state
 {
     b32 KeyDown[GLFW_KEY_LAST + 1];
     b32 MouseButtonDown[GLFW_MOUSE_BUTTON_LAST + 1];
@@ -35,7 +35,7 @@ struct gfx_input_state
     ctk::vec2<f64> MouseDelta;
 };
 
-struct gfx_vulkan_instance
+struct vulkan_instance
 {
     vtk::instance Instance;
     VkSurfaceKHR PlatformSurface;
@@ -48,33 +48,31 @@ struct gfx_vulkan_instance
     vtk::buffer HostBuffer;
     vtk::buffer DeviceBuffer;
     vtk::region StagingRegion;
-    ctk::sarray<vtk::image, 4> RenderPassImages;
-    ctk::sarray<VkCommandBuffer, 4> ImageCopyCommandBuffers;
 };
 
-struct gfx_vertex
+struct vertex
 {
     ctk::vec3<f32> Position;
     ctk::vec3<f32> Normal;
     ctk::vec2<f32> UV;
 };
 
-struct gfx_mesh
+struct mesh
 {
-    ctk::array<gfx_vertex> Vertexes;
+    ctk::array<vertex> Vertexes;
     ctk::array<u32> Indexes;
     vtk::region VertexRegion;
     vtk::region IndexRegion;
 };
 
-struct gfx_assets
+struct assets
 {
-    ctk::smap<gfx_mesh, 16> Meshes;
+    ctk::smap<mesh, 16> Meshes;
     ctk::smap<vtk::texture, 16> Textures;
     ctk::smap<vtk::shader_module, 16> ShaderModules;
 };
 
-struct gfx_vulkan_state
+struct vulkan_state
 {
     VkDescriptorPool DescriptorPool;
     vtk::vertex_layout VertexLayout;
@@ -84,13 +82,13 @@ struct gfx_vulkan_state
     ctk::smap<vtk::graphics_pipeline, 16> GraphicsPipelines;
 };
 
-struct gfx_entity_ubo
+struct entity_ubo
 {
     alignas(16) glm::mat4 ModelMatrix;
     alignas(16) glm::mat4 MVPMatrix;
 };
 
-struct gfx_light_ubo
+struct light_ubo
 {
     alignas(16) ctk::vec4<f32> Color;
     alignas(16) ctk::vec3<f32> Position;
@@ -100,17 +98,55 @@ struct gfx_light_ubo
     f32 OuterCutoff;
 };
 
+struct transform
+{
+    ctk::vec3<f32> Position;
+    ctk::vec3<f32> Rotation;
+    ctk::vec3<f32> Scale;
+};
+
+struct camera
+{
+    transform Transform;
+    f32 FieldOfView;
+};
+
+struct entity
+{
+    transform Transform;
+    ctk::sarray<vtk::descriptor_set *, 4> DescriptorSets;
+    vtk::graphics_pipeline *GraphicsPipeline;
+    mesh *Mesh;
+};
+
+struct scene
+{
+    camera Camera;
+    ctk::smap<entity, 64> Entities;
+    ctk::sarray<entity_ubo, 64> EntityUBOs;
+    vtk::uniform_buffer *EntityUniformBuffer;
+};
+
 ////////////////////////////////////////////////////////////
 /// Interface
 ////////////////////////////////////////////////////////////
-gfx_window *
-gfx_create_window(gfx_input_state *InputState);
+window *
+create_window(input_state *InputState);
 
-gfx_vulkan_instance *
-gfx_create_vulkan_instance(gfx_window *Window);
+vulkan_instance *
+create_vulkan_instance(window *Window);
 
-gfx_assets *
-gfx_create_assets(gfx_vulkan_instance *VulkanInstance);
+assets *
+create_assets(vulkan_instance *VulkanInstance);
 
-gfx_vulkan_state *
-gfx_create_vulkan_state(gfx_vulkan_instance *VulkanInstance, gfx_assets *Assets);
+vulkan_state *
+create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets);
+
+void
+update_uniform_data(scene *Scene, vulkan_instance *VulkanInstance);
+
+void
+record_render_pass(vulkan_instance *VulkanInstance, scene *Scene);
+
+void
+render(vulkan_instance *VulkanInstance);
