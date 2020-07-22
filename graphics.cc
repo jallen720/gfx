@@ -212,8 +212,6 @@ create_vulkan_instance(window *Window)
     DepthImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     DepthImageInfo.AspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
     *DepthImage = vtk::CreateImage(Device, &DepthImageInfo);
-    vtk::TransitionImageLayout(Device, *GraphicsCommandPool, DepthImage,
-                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
     ////////////////////////////////////////////////////////////
     /// Render Pass
