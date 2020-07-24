@@ -164,7 +164,6 @@ create_vulkan_instance(window *Window)
     vtk::render_pass *RenderPass = &VulkanInstance->RenderPass;
     vtk::buffer *HostBuffer = &VulkanInstance->HostBuffer;
 
-    // Load data file.
     ctk::data VulkanInstanceData = ctk::LoadData("assets/data/vulkan_instance.ctkd");
 
     // Instance
@@ -188,16 +187,11 @@ create_vulkan_instance(window *Window)
     // DeviceInfo.Features.vertexPipelineStoresAndAtomics = VK_TRUE;
     *Device = vtk::CreateDevice(Instance->Handle, *PlatformSurface, &DeviceInfo);
 
-    // Graphics Command Pool
-    *GraphicsCommandPool = vtk::CreateCommandPool(Device->Logical, Device->QueueFamilyIndexes.Graphics);
-
     // Swapchain
     *Swapchain = vtk::CreateSwapchain(Device, *PlatformSurface);
-    for(u32 i = 0; i < Swapchain->Images.Count; ++i)
-    {
-        TransitionImageLayout(Device, *GraphicsCommandPool, Swapchain->Images + i,
-                              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-    }
+
+    // Graphics Command Pool
+    *GraphicsCommandPool = vtk::CreateCommandPool(Device->Logical, Device->QueueFamilyIndexes.Graphics);
 
     // Frame State
     VulkanInstance->FrameState = vtk::CreateFrameState(Device->Logical, 2, Swapchain->Images.Count);
@@ -258,7 +252,6 @@ create_vulkan_instance(window *Window)
     for(u32 FramebufferIndex = 0; FramebufferIndex < Swapchain->Images.Count; ++FramebufferIndex)
     {
         vtk::framebuffer_info *FramebufferInfo = ctk::Push(&RenderPassInfo.FramebufferInfos);
-        // ctk::Push(&FramebufferInfo->Attachments, VulkanInstance->RenderPassImages[FramebufferIndex].View);
         ctk::Push(&FramebufferInfo->Attachments, Swapchain->Images[FramebufferIndex].View);
         ctk::Push(&FramebufferInfo->Attachments, DepthImage->View);
         FramebufferInfo->Extent = Swapchain->Extent;
@@ -268,9 +261,6 @@ create_vulkan_instance(window *Window)
     // Creation
     *RenderPass = vtk::CreateRenderPass(Device->Logical, *GraphicsCommandPool, &RenderPassInfo);
 
-    ////////////////////////////////////////////////////////////
-    /// Memory
-    ////////////////////////////////////////////////////////////
 
     // Buffers
     vtk::buffer_info HostBufferInfo = {};
@@ -299,7 +289,6 @@ create_assets(vulkan_instance *VulkanInstance)
 
     vtk::device *Device = &VulkanInstance->Device;
 
-    // Load data file.
     ctk::data AssetData = ctk::LoadData("assets/data/assets.ctkd");
 
     ////////////////////////////////////////////////////////////
@@ -356,7 +345,6 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
     auto *DescriptorSets = &VulkanState->DescriptorSets;
     auto *VertexAttributeIndexes = &VulkanState->VertexAttributeIndexes;
 
-    // Load data file.
     ctk::data VulkanStateData = ctk::LoadData("assets/data/vulkan_state.ctkd");
 
     ////////////////////////////////////////////////////////////
