@@ -43,8 +43,6 @@ struct vulkan_instance
     vtk::swapchain Swapchain;
     VkCommandPool GraphicsCommandPool;
     vtk::frame_state FrameState;
-    vtk::image DepthImage;
-    vtk::render_pass RenderPass;
     vtk::buffer HostBuffer;
     vtk::buffer DeviceBuffer;
     vtk::region StagingRegion;
@@ -80,6 +78,9 @@ struct vulkan_state
     ctk::smap<vtk::descriptor_set, 16> DescriptorSets;
     ctk::smap<u32, 4> VertexAttributeIndexes;
     ctk::smap<vtk::graphics_pipeline, 16> GraphicsPipelines;
+    vtk::image DepthImage;
+    ctk::smap<vtk::render_pass, 4> RenderPasses;
+    VkSemaphore DeferredRenderingFinishedSemaphore;
 };
 
 struct entity_ubo
@@ -143,10 +144,16 @@ vulkan_state *
 create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets);
 
 void
-update_uniform_data(scene *Scene, vulkan_instance *VulkanInstance);
+update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene);
+
+// void
+// record_direct_render_pass(vulkan_instance *VulkanInstance, scene *Scene);
 
 void
-record_render_pass(vulkan_instance *VulkanInstance, scene *Scene);
+record_deferred_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, scene *Scene);
 
 void
-render(vulkan_instance *VulkanInstance);
+record_lighting_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, assets *Assets);
+
+void
+render(vulkan_instance *VulkanInstance, vulkan_state *VulkanState);

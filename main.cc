@@ -48,13 +48,28 @@ create_scene(vulkan_state *VulkanState, assets *Assets, cstr Path)
         ctk::data *EntityData = ctk::At(EntityMap, EntityIndex);
         entity *Entity = ctk::Push(&Scene->Entities, EntityData->Key.Data);
         ctk::Push(&Scene->EntityUBOs);
+
+        // Transform
         Entity->Transform = load_transform(ctk::At(EntityData, "transform"));
-        ctk::data *DescriptorSetArray = ctk::At(EntityData, "descriptor_sets");
-        for(u32 DescriptorSetIndex = 0; DescriptorSetIndex < DescriptorSetArray->Children.Count; ++DescriptorSetIndex)
+
+        // Descriptor Sets (optional)
+        ctk::data *DescriptorSetArray = ctk::Find(EntityData, "descriptor_sets");
+        if(DescriptorSetArray)
         {
-            ctk::Push(&Entity->DescriptorSets, At(&VulkanState->DescriptorSets, ctk::CStr(DescriptorSetArray, DescriptorSetIndex)));
+            for(u32 DescriptorSetIndex = 0; DescriptorSetIndex < DescriptorSetArray->Children.Count; ++DescriptorSetIndex)
+            {
+                ctk::Push(&Entity->DescriptorSets, At(&VulkanState->DescriptorSets, ctk::CStr(DescriptorSetArray, DescriptorSetIndex)));
+            }
         }
-        Entity->GraphicsPipeline = ctk::At(&VulkanState->GraphicsPipelines, ctk::CStr(EntityData, "graphics_pipeline"));
+
+        // Graphics Pipeline (optional)
+        ctk::data *GraphicsPipelineName = ctk::Find(EntityData, "graphics_pipeline");
+        if(GraphicsPipelineName)
+        {
+            Entity->GraphicsPipeline = ctk::At(&VulkanState->GraphicsPipelines, ctk::CStr(GraphicsPipelineName));
+        }
+
+        // Mesh
         Entity->Mesh = ctk::At(&Assets->Meshes, ctk::CStr(EntityData, "mesh"));
     }
     Scene->EntityUniformBuffer = ctk::At(&VulkanState->UniformBuffers, "entity");
@@ -153,8 +168,9 @@ main()
     assets *Assets = create_assets(VulkanInstance);
     vulkan_state *VulkanState = create_vulkan_state(VulkanInstance, Assets);
 
-    scene *Scene = create_scene(VulkanState, Assets, "assets/scenes/test_scene.ctkd");
-    record_render_pass(VulkanInstance, Scene);
+    scene *Scene = create_scene(VulkanState, Assets, "assets/scenes/deferred.ctkd");
+    record_deferred_render_pass(VulkanInstance, VulkanState, Scene);
+    record_lighting_render_pass(VulkanInstance, VulkanState, Assets);
     while(!glfwWindowShouldClose(Window->Handle))
     {
         // Check if window should close.
@@ -167,8 +183,8 @@ main()
         // Frame processing.
         update_input_state(&InputState, Window->Handle);
         camera_controls(&Scene->Camera.Transform, &InputState);
-        update_uniform_data(Scene, VulkanInstance);
-        render(VulkanInstance);
+        update_uniform_data(VulkanInstance, Scene);
+        render(VulkanInstance, VulkanState);
         Sleep(1);
     }
 }

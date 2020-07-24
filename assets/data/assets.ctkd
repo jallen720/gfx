@@ -33,10 +33,33 @@ shader_modules
         path assets/shaders/shader.frag.spv
         stage VK_SHADER_STAGE_FRAGMENT_BIT
     }
+
+    deferred_vert
+    {
+        path assets/shaders/deferred/deferred.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    deferred_frag
+    {
+        path assets/shaders/deferred/deferred.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
+
+    lighting_vert
+    {
+        path assets/shaders/deferred/lighting.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    lighting_frag
+    {
+        path assets/shaders/deferred/lighting.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
 }
 models
 {
     cube { path assets/models/cube.obj }
     quad { path assets/models/quad.obj }
     sibenik { path assets/models/sibenik/sibenik.obj }
+    fullscreen_plane { path assets/models/fullscreen_plane.obj }
 }

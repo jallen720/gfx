@@ -1,0 +1,29 @@
+camera
+{
+    transform
+    {
+        position [ 0 0 -1 ]
+        rotation [ 0 0 0 ]
+        scale [ 1 1 1 ]
+    }
+    field_of_view 90
+}
+entities
+{
+    cube
+    {
+        transform
+        {
+            position [ 0 0 0 ]
+            rotation [ 0 0 0 ]
+            scale [ 1 1 1 ]
+        }
+        descriptor_sets
+        [
+            entity
+            grass_cube_texture
+        ]
+        graphics_pipeline deferred
+        mesh cube
+    }
+}
