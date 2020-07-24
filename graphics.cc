@@ -51,7 +51,7 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
     ////////////////////////////////////////////////////////////
     /// Allocation
     ////////////////////////////////////////////////////////////
-    ctk::Todo("HACK: Baking all meshes from file into single mesh.");
+    ctk::todo("HACK: Baking all meshes from file into single mesh.");
     u32 VertexCount = 0;
     u32 IndexCount = 0;
     for(u32 MeshIndex = 0; MeshIndex < Scene->mNumMeshes; ++MeshIndex)
@@ -63,8 +63,8 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
             IndexCount += Mesh->mFaces[FaceIndex].mNumIndices;
         }
     }
-    Mesh.Vertexes = ctk::CreateArrayEmpty<vertex>(VertexCount);
-    Mesh.Indexes = ctk::CreateArrayEmpty<u32>(IndexCount);
+    Mesh.Vertexes = ctk::create_array_empty<vertex>(VertexCount);
+    Mesh.Indexes = ctk::create_array_empty<u32>(IndexCount);
 
     ////////////////////////////////////////////////////////////
     /// Processing
@@ -75,7 +75,7 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
         u32 IndexBase = Mesh.Vertexes.Count;
         for(u32 VertexIndex = 0; VertexIndex < SceneMesh->mNumVertices; ++VertexIndex)
         {
-            vertex *Vertex = ctk::Push(&Mesh.Vertexes);
+            vertex *Vertex = ctk::push(&Mesh.Vertexes);
             aiVector3D *Position = SceneMesh->mVertices + VertexIndex;
             aiVector3D *Normal = SceneMesh->mNormals + VertexIndex;
             Vertex->Position = { Position->x, Position->y, Position->z };
@@ -97,20 +97,20 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
             aiFace *Face = SceneMesh->mFaces + FaceIndex;
             for(u32 IndexIndex = 0; IndexIndex < Face->mNumIndices; ++IndexIndex)
             {
-                ctk::Push(&Mesh.Indexes, IndexBase + Face->mIndices[IndexIndex]);
+                ctk::push(&Mesh.Indexes, IndexBase + Face->mIndices[IndexIndex]);
             }
         }
     }
 
     // Allocate and write vertex/index data to their associated regions.
-    u32 VertexByteSize = ctk::ByteSize(&Mesh.Vertexes);
-    u32 IndexByteSize = ctk::ByteSize(&Mesh.Indexes);
-    Mesh.VertexRegion = vtk::AllocateRegion(DeviceBuffer, VertexByteSize);
-    Mesh.IndexRegion = vtk::AllocateRegion(DeviceBuffer, IndexByteSize);
-    vtk::WriteToDeviceRegion(Device, GraphicsCommandPool, StagingRegion, &Mesh.VertexRegion,
-                             Mesh.Vertexes.Data, VertexByteSize, 0);
-    vtk::WriteToDeviceRegion(Device, GraphicsCommandPool, StagingRegion, &Mesh.IndexRegion,
-                             Mesh.Indexes.Data, IndexByteSize, 0);
+    u32 VertexByteSize = ctk::byte_size(&Mesh.Vertexes);
+    u32 IndexByteSize = ctk::byte_size(&Mesh.Indexes);
+    Mesh.VertexRegion = vtk::allocate_region(DeviceBuffer, VertexByteSize);
+    Mesh.IndexRegion = vtk::allocate_region(DeviceBuffer, IndexByteSize);
+    vtk::write_to_device_region(Device, GraphicsCommandPool, StagingRegion, &Mesh.VertexRegion,
+                                Mesh.Vertexes.Data, VertexByteSize, 0);
+    vtk::write_to_device_region(Device, GraphicsCommandPool, StagingRegion, &Mesh.IndexRegion,
+                                Mesh.Indexes.Data, IndexByteSize, 0);
 
     // Cleanup
     aiReleaseImport(Scene);
@@ -146,7 +146,7 @@ create_deferred_rendering_state(vulkan_instance *VulkanInstance, assets *Assets)
     RenderTargetSamplerCreateInfo.maxLod = 0.0f;
 
     // Albedo Texture
-    vtk::texture *AlbedoTexture = ctk::Push(&Assets->Textures, "deferred_albedo");
+    vtk::texture *AlbedoTexture = ctk::push(&Assets->Textures, "deferred_albedo");
 
     vtk::image_info AlbedoImageInfo = {};
     AlbedoImageInfo.Width = Swapchain->Extent.width;
@@ -156,14 +156,14 @@ create_deferred_rendering_state(vulkan_instance *VulkanInstance, assets *Assets)
     AlbedoImageInfo.UsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     AlbedoImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     AlbedoImageInfo.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    AlbedoTexture->Image = vtk::CreateImage(Device, &AlbedoImageInfo);
-    AlbedoTexture->Image.Layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; ctk::Todo("hack image layout to work with descriptor set updating");
+    AlbedoTexture->Image = vtk::create_image(Device, &AlbedoImageInfo);
+    AlbedoTexture->Image.Layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; ctk::todo("hack image layout to work with descriptor set updating");
 
-    vtk::ValidateVkResult(vkCreateSampler(Device->Logical, &RenderTargetSamplerCreateInfo, NULL, &AlbedoTexture->Sampler),
-                          "vkCreateSampler", "failed to create texture sampler");
+    vtk::validate_vk_result(vkCreateSampler(Device->Logical, &RenderTargetSamplerCreateInfo, NULL, &AlbedoTexture->Sampler),
+                            "vkCreateSampler", "failed to create texture sampler");
 
     // Position Texture
-    vtk::texture *PositionTexture = ctk::Push(&Assets->Textures, "deferred_position");
+    vtk::texture *PositionTexture = ctk::push(&Assets->Textures, "deferred_position");
 
     vtk::image_info PositionImageInfo = {};
     PositionImageInfo.Width = Swapchain->Extent.width;
@@ -173,11 +173,11 @@ create_deferred_rendering_state(vulkan_instance *VulkanInstance, assets *Assets)
     PositionImageInfo.UsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     PositionImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     PositionImageInfo.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    PositionTexture->Image = vtk::CreateImage(Device, &PositionImageInfo);
-    PositionTexture->Image.Layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; ctk::Todo("hack image layout to work with descriptor set updating");
+    PositionTexture->Image = vtk::create_image(Device, &PositionImageInfo);
+    PositionTexture->Image.Layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; ctk::todo("hack image layout to work with descriptor set updating");
 
-    vtk::ValidateVkResult(vkCreateSampler(Device->Logical, &RenderTargetSamplerCreateInfo, NULL, &PositionTexture->Sampler),
-                          "vkCreateSampler", "failed to create texture sampler");
+    vtk::validate_vk_result(vkCreateSampler(Device->Logical, &RenderTargetSamplerCreateInfo, NULL, &PositionTexture->Sampler),
+                            "vkCreateSampler", "failed to create texture sampler");
 }
 
 static void
@@ -203,14 +203,14 @@ create_render_passes(vulkan_instance *VulkanInstance, assets *Assets, vulkan_sta
     // ////////////////////////////////////////////////////////////
     // /// Direct Render Pass
     // ////////////////////////////////////////////////////////////
-    // vtk::render_pass *DirectRenderPass = ctk::Push(&VulkanInstance->RenderPasses, "direct");
+    // vtk::render_pass *DirectRenderPass = ctk::push(&VulkanInstance->RenderPasses, "direct");
 
     // // Render Pass Info
     // vtk::render_pass_info DirectRenderPassInfo = {};
 
     // // Attachments
     // u32 DirectColorAttachmentIndex = DirectRenderPassInfo.Attachments.Count;
-    // vtk::attachment *DirectColorAttachment = ctk::Push(&DirectRenderPassInfo.Attachments);
+    // vtk::attachment *DirectColorAttachment = ctk::push(&DirectRenderPassInfo.Attachments);
     // DirectColorAttachment->Description.format = Swapchain->ImageFormat;
     // DirectColorAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
     // DirectColorAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -222,12 +222,12 @@ create_render_passes(vulkan_instance *VulkanInstance, assets *Assets, vulkan_sta
     // DirectColorAttachment->ClearValue = COLOR_ATTACHMENT_CLEAR_VALUE;
 
     // u32 DirectDepthAttachmentIndex = DirectRenderPassInfo.Attachments.Count;
-    // ctk::Push(&DirectRenderPassInfo.Attachments, DepthAttachment);
+    // ctk::push(&DirectRenderPassInfo.Attachments, DepthAttachment);
 
     // // Subpasses
-    // vtk::subpass *DirectSubpass = ctk::Push(&DirectRenderPassInfo.Subpasses);
+    // vtk::subpass *DirectSubpass = ctk::push(&DirectRenderPassInfo.Subpasses);
 
-    // VkAttachmentReference *DirectColorAttachmentReference = ctk::Push(&DirectSubpass->ColorAttachmentReferences);
+    // VkAttachmentReference *DirectColorAttachmentReference = ctk::push(&DirectSubpass->ColorAttachmentReferences);
     // DirectColorAttachmentReference->attachment = DirectColorAttachmentIndex;
     // DirectColorAttachmentReference->layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
@@ -238,28 +238,28 @@ create_render_passes(vulkan_instance *VulkanInstance, assets *Assets, vulkan_sta
     // // Framebuffer Infos
     // for(u32 FramebufferIndex = 0; FramebufferIndex < Swapchain->Images.Count; ++FramebufferIndex)
     // {
-    //     vtk::framebuffer_info *FramebufferInfo = ctk::Push(&DirectRenderPassInfo.FramebufferInfos);
-    //     ctk::Push(&FramebufferInfo->Attachments, Swapchain->Images[FramebufferIndex].View);
-    //     ctk::Push(&FramebufferInfo->Attachments, DepthImage->View);
+    //     vtk::framebuffer_info *FramebufferInfo = ctk::push(&DirectRenderPassInfo.FramebufferInfos);
+    //     ctk::push(&FramebufferInfo->Attachments, Swapchain->Images[FramebufferIndex].View);
+    //     ctk::push(&FramebufferInfo->Attachments, DepthImage->View);
     //     FramebufferInfo->Extent = Swapchain->Extent;
     //     FramebufferInfo->Layers = 1;
     // }
 
-    // *DirectRenderPass = vtk::CreateRenderPass(Device->Logical, VulkanInstance->GraphicsCommandPool, &DirectRenderPassInfo);
+    // *DirectRenderPass = vtk::create_render_pass(Device->Logical, VulkanInstance->GraphicsCommandPool, &DirectRenderPassInfo);
 
     ////////////////////////////////////////////////////////////
     /// Deferred Render Pass
     ////////////////////////////////////////////////////////////
-    vtk::render_pass *DeferredRenderPass = ctk::Push(&VulkanState->RenderPasses, "deferred");
-    vtk::image *AlbedoImage = &ctk::At(&Assets->Textures, "deferred_albedo")->Image;
-    vtk::image *PositionImage = &ctk::At(&Assets->Textures, "deferred_position")->Image;
+    vtk::render_pass *DeferredRenderPass = ctk::push(&VulkanState->RenderPasses, "deferred");
+    vtk::image *AlbedoImage = &ctk::at(&Assets->Textures, "deferred_albedo")->Image;
+    vtk::image *PositionImage = &ctk::at(&Assets->Textures, "deferred_position")->Image;
 
     // Render Pass Info
     vtk::render_pass_info DeferredRenderPassInfo = {};
 
     // Attachments
     u32 DeferredAlbedoAttachmentIndex = DeferredRenderPassInfo.Attachments.Count;
-    vtk::attachment *DeferredAlbedoAttachment = ctk::Push(&DeferredRenderPassInfo.Attachments);
+    vtk::attachment *DeferredAlbedoAttachment = ctk::push(&DeferredRenderPassInfo.Attachments);
     DeferredAlbedoAttachment->Description.format = AlbedoImage->Format;
     DeferredAlbedoAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
     DeferredAlbedoAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -271,7 +271,7 @@ create_render_passes(vulkan_instance *VulkanInstance, assets *Assets, vulkan_sta
     DeferredAlbedoAttachment->ClearValue = COLOR_ATTACHMENT_CLEAR_VALUE;
 
     u32 DeferredPositionAttachmentIndex = DeferredRenderPassInfo.Attachments.Count;
-    vtk::attachment *DeferredPositionAttachment = ctk::Push(&DeferredRenderPassInfo.Attachments);
+    vtk::attachment *DeferredPositionAttachment = ctk::push(&DeferredRenderPassInfo.Attachments);
     DeferredPositionAttachment->Description.format = PositionImage->Format;
     DeferredPositionAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
     DeferredPositionAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -283,16 +283,16 @@ create_render_passes(vulkan_instance *VulkanInstance, assets *Assets, vulkan_sta
     DeferredPositionAttachment->ClearValue = COLOR_ATTACHMENT_CLEAR_VALUE;
 
     u32 DeferredDepthAttachmentIndex = DeferredRenderPassInfo.Attachments.Count;
-    ctk::Push(&DeferredRenderPassInfo.Attachments, DepthAttachment);
+    ctk::push(&DeferredRenderPassInfo.Attachments, DepthAttachment);
 
     // Subpasses
-    vtk::subpass *DeferredSubpass = ctk::Push(&DeferredRenderPassInfo.Subpasses);
+    vtk::subpass *DeferredSubpass = ctk::push(&DeferredRenderPassInfo.Subpasses);
 
-    VkAttachmentReference *DeferredAlbedoAttachmentReference = ctk::Push(&DeferredSubpass->ColorAttachmentReferences);
+    VkAttachmentReference *DeferredAlbedoAttachmentReference = ctk::push(&DeferredSubpass->ColorAttachmentReferences);
     DeferredAlbedoAttachmentReference->attachment = DeferredAlbedoAttachmentIndex;
     DeferredAlbedoAttachmentReference->layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    VkAttachmentReference *DeferredPositionAttachmentReference = ctk::Push(&DeferredSubpass->ColorAttachmentReferences);
+    VkAttachmentReference *DeferredPositionAttachmentReference = ctk::push(&DeferredSubpass->ColorAttachmentReferences);
     DeferredPositionAttachmentReference->attachment = DeferredPositionAttachmentIndex;
     DeferredPositionAttachmentReference->layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
@@ -301,26 +301,26 @@ create_render_passes(vulkan_instance *VulkanInstance, assets *Assets, vulkan_sta
     DeferredSubpass->DepthAttachmentReference.Value.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
     // Framebuffer Infos
-    vtk::framebuffer_info *FramebufferInfo = ctk::Push(&DeferredRenderPassInfo.FramebufferInfos);
-    ctk::Push(&FramebufferInfo->Attachments, AlbedoImage->View);
-    ctk::Push(&FramebufferInfo->Attachments, PositionImage->View);
-    ctk::Push(&FramebufferInfo->Attachments, DepthImage->View);
+    vtk::framebuffer_info *FramebufferInfo = ctk::push(&DeferredRenderPassInfo.FramebufferInfos);
+    ctk::push(&FramebufferInfo->Attachments, AlbedoImage->View);
+    ctk::push(&FramebufferInfo->Attachments, PositionImage->View);
+    ctk::push(&FramebufferInfo->Attachments, DepthImage->View);
     FramebufferInfo->Extent = Swapchain->Extent;
     FramebufferInfo->Layers = 1;
 
-    *DeferredRenderPass = vtk::CreateRenderPass(Device->Logical, VulkanInstance->GraphicsCommandPool, &DeferredRenderPassInfo);
+    *DeferredRenderPass = vtk::create_render_pass(Device->Logical, VulkanInstance->GraphicsCommandPool, &DeferredRenderPassInfo);
 
     ////////////////////////////////////////////////////////////
     /// Lighting Render Pass
     ////////////////////////////////////////////////////////////
-    vtk::render_pass *LightingRenderPass = ctk::Push(&VulkanState->RenderPasses, "lighting");
+    vtk::render_pass *LightingRenderPass = ctk::push(&VulkanState->RenderPasses, "lighting");
 
     // Render Pass Info
     vtk::render_pass_info LightingRenderPassInfo = {};
 
     // Attachments
     u32 LightingColorAttachmentIndex = LightingRenderPassInfo.Attachments.Count;
-    vtk::attachment *LightingColorAttachment = ctk::Push(&LightingRenderPassInfo.Attachments);
+    vtk::attachment *LightingColorAttachment = ctk::push(&LightingRenderPassInfo.Attachments);
     LightingColorAttachment->Description.format = Swapchain->ImageFormat;
     LightingColorAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
     LightingColorAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -332,12 +332,12 @@ create_render_passes(vulkan_instance *VulkanInstance, assets *Assets, vulkan_sta
     LightingColorAttachment->ClearValue = COLOR_ATTACHMENT_CLEAR_VALUE;
 
     u32 LightingDepthAttachmentIndex = LightingRenderPassInfo.Attachments.Count;
-    ctk::Push(&LightingRenderPassInfo.Attachments, DepthAttachment);
+    ctk::push(&LightingRenderPassInfo.Attachments, DepthAttachment);
 
     // Subpasses
-    vtk::subpass *LightingSubpass = ctk::Push(&LightingRenderPassInfo.Subpasses);
+    vtk::subpass *LightingSubpass = ctk::push(&LightingRenderPassInfo.Subpasses);
 
-    VkAttachmentReference *LightingColorAttachmentReference = ctk::Push(&LightingSubpass->ColorAttachmentReferences);
+    VkAttachmentReference *LightingColorAttachmentReference = ctk::push(&LightingSubpass->ColorAttachmentReferences);
     LightingColorAttachmentReference->attachment = LightingColorAttachmentIndex;
     LightingColorAttachmentReference->layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
@@ -348,14 +348,14 @@ create_render_passes(vulkan_instance *VulkanInstance, assets *Assets, vulkan_sta
     // Framebuffer Infos
     for(u32 FramebufferIndex = 0; FramebufferIndex < Swapchain->Images.Count; ++FramebufferIndex)
     {
-        vtk::framebuffer_info *FramebufferInfo = ctk::Push(&LightingRenderPassInfo.FramebufferInfos);
-        ctk::Push(&FramebufferInfo->Attachments, Swapchain->Images[FramebufferIndex].View);
-        ctk::Push(&FramebufferInfo->Attachments, DepthImage->View);
+        vtk::framebuffer_info *FramebufferInfo = ctk::push(&LightingRenderPassInfo.FramebufferInfos);
+        ctk::push(&FramebufferInfo->Attachments, Swapchain->Images[FramebufferIndex].View);
+        ctk::push(&FramebufferInfo->Attachments, DepthImage->View);
         FramebufferInfo->Extent = Swapchain->Extent;
         FramebufferInfo->Layers = 1;
     }
 
-    *LightingRenderPass = vtk::CreateRenderPass(Device->Logical, VulkanInstance->GraphicsCommandPool, &LightingRenderPassInfo);
+    *LightingRenderPass = vtk::create_render_pass(Device->Logical, VulkanInstance->GraphicsCommandPool, &LightingRenderPassInfo);
 }
 
 ////////////////////////////////////////////////////////////
@@ -364,9 +364,9 @@ create_render_passes(vulkan_instance *VulkanInstance, assets *Assets, vulkan_sta
 window *
 create_window(input_state *InputState)
 {
-    auto Window = ctk::Alloc<window>();
+    auto Window = ctk::allocate<window>();
     *Window = {};
-    ctk::data Data = ctk::LoadData("assets/data/window.ctkd");
+    ctk::data Data = ctk::load_data("assets/data/window.ctkd");
     glfwSetErrorCallback(error_callback);
     if(glfwInit() != GLFW_TRUE)
     {
@@ -374,14 +374,14 @@ create_window(input_state *InputState)
     }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-    Window->Width = S32(&Data, "width");
-    Window->Height = S32(&Data, "height");
-    Window->Handle = glfwCreateWindow(Window->Width, Window->Height, CStr(&Data, "title"), NULL, NULL);
+    Window->Width = ctk::to_s32(&Data, "width");
+    Window->Height = ctk::to_s32(&Data, "height");
+    Window->Handle = glfwCreateWindow(Window->Width, Window->Height, ctk::to_cstr(&Data, "title"), NULL, NULL);
     if(Window->Handle == NULL)
     {
         CTK_FATAL("failed to create window")
     }
-    glfwSetWindowPos(Window->Handle, S32(&Data, "x"), S32(&Data, "y"));
+    glfwSetWindowPos(Window->Handle, ctk::to_s32(&Data, "x"), ctk::to_s32(&Data, "y"));
     glfwSetWindowUserPointer(Window->Handle, (void *)InputState);
     // glfwSetFramebufferSizeCallback(Window->Handle, FramebufferResizeCallback);
     glfwSetKeyCallback(Window->Handle, key_callback);
@@ -392,7 +392,7 @@ create_window(input_state *InputState)
 vulkan_instance *
 create_vulkan_instance(window *Window)
 {
-    auto VulkanInstance = ctk::Alloc<vulkan_instance>();
+    auto VulkanInstance = ctk::allocate<vulkan_instance>();
     *VulkanInstance = {};
 
     vtk::instance *Instance = &VulkanInstance->Instance;
@@ -402,53 +402,53 @@ create_vulkan_instance(window *Window)
     VkCommandPool *GraphicsCommandPool = &VulkanInstance->GraphicsCommandPool;
     vtk::buffer *HostBuffer = &VulkanInstance->HostBuffer;
 
-    ctk::data VulkanInstanceData = ctk::LoadData("assets/data/vulkan_instance.ctkd");
+    ctk::data VulkanInstanceData = ctk::load_data("assets/data/vulkan_instance.ctkd");
 
     // Instance
     u32 GLFWExtensionCount = 0;
     cstr *GLFWExtensions = glfwGetRequiredInstanceExtensions(&GLFWExtensionCount);
     vtk::instance_info InstanceInfo = {};
-    ctk::Push(&InstanceInfo.Extensions, GLFWExtensions, GLFWExtensionCount);
-    InstanceInfo.Debug = ctk::B32(&VulkanInstanceData, "debug");
-    InstanceInfo.AppName = ctk::CStr(&VulkanInstanceData, "app_name");
-    *Instance = vtk::CreateInstance(&InstanceInfo);
+    ctk::push(&InstanceInfo.Extensions, GLFWExtensions, GLFWExtensionCount);
+    InstanceInfo.Debug = ctk::to_b32(&VulkanInstanceData, "debug");
+    InstanceInfo.AppName = ctk::to_cstr(&VulkanInstanceData, "app_name");
+    *Instance = vtk::create_instance(&InstanceInfo);
 
     // Platform Surface
-    vtk::ValidateVkResult(glfwCreateWindowSurface(Instance->Handle, Window->Handle, NULL, PlatformSurface),
-                          "glfwCreateWindowSurface", "failed to create GLFW surface");
+    vtk::validate_vk_result(glfwCreateWindowSurface(Instance->Handle, Window->Handle, NULL, PlatformSurface),
+                            "glfwCreateWindowSurface", "failed to create GLFW surface");
 
     // Device
     vtk::device_info DeviceInfo = {};
-    ctk::Push(&DeviceInfo.Extensions, VK_KHR_SWAPCHAIN_EXTENSION_NAME); // Swapchains required for rendering.
+    ctk::push(&DeviceInfo.Extensions, VK_KHR_SWAPCHAIN_EXTENSION_NAME); // Swapchains required for rendering.
     DeviceInfo.Features.geometryShader = VK_TRUE;
     DeviceInfo.Features.samplerAnisotropy = VK_TRUE;
     // DeviceInfo.Features.vertexPipelineStoresAndAtomics = VK_TRUE;
-    *Device = vtk::CreateDevice(Instance->Handle, *PlatformSurface, &DeviceInfo);
+    *Device = vtk::create_device(Instance->Handle, *PlatformSurface, &DeviceInfo);
 
     // Swapchain
-    *Swapchain = vtk::CreateSwapchain(Device, *PlatformSurface);
+    *Swapchain = vtk::create_swapchain(Device, *PlatformSurface);
 
     // Graphics Command Pool
-    *GraphicsCommandPool = vtk::CreateCommandPool(Device->Logical, Device->QueueFamilyIndexes.Graphics);
+    *GraphicsCommandPool = vtk::create_command_pool(Device->Logical, Device->QueueFamilyIndexes.Graphics);
 
     // Frame State
-    VulkanInstance->FrameState = vtk::CreateFrameState(Device->Logical, 2, Swapchain->Images.Count);
+    VulkanInstance->FrameState = vtk::create_frame_state(Device->Logical, 2, Swapchain->Images.Count);
 
     // Buffers
     vtk::buffer_info HostBufferInfo = {};
     HostBufferInfo.Size = 100 * CTK_MEGABYTE;
     HostBufferInfo.UsageFlags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     HostBufferInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    *HostBuffer = vtk::CreateBuffer(Device, &HostBufferInfo);
+    *HostBuffer = vtk::create_buffer(Device, &HostBufferInfo);
 
     vtk::buffer_info DeviceBufferInfo = {};
     DeviceBufferInfo.Size = 100 * CTK_MEGABYTE;
     DeviceBufferInfo.UsageFlags = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     DeviceBufferInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    VulkanInstance->DeviceBuffer = vtk::CreateBuffer(Device, &DeviceBufferInfo);
+    VulkanInstance->DeviceBuffer = vtk::create_buffer(Device, &DeviceBufferInfo);
 
     // Regions
-    VulkanInstance->StagingRegion = vtk::AllocateRegion(HostBuffer, 50 * CTK_MEGABYTE);
+    VulkanInstance->StagingRegion = vtk::allocate_region(HostBuffer, 50 * CTK_MEGABYTE);
 
     return VulkanInstance;
 }
@@ -456,47 +456,47 @@ create_vulkan_instance(window *Window)
 assets *
 create_assets(vulkan_instance *VulkanInstance)
 {
-    auto Assets = ctk::Alloc<assets>();
+    auto Assets = ctk::allocate<assets>();
     *Assets = {};
 
     vtk::device *Device = &VulkanInstance->Device;
 
-    ctk::data AssetData = ctk::LoadData("assets/data/assets.ctkd");
+    ctk::data AssetData = ctk::load_data("assets/data/assets.ctkd");
 
     ////////////////////////////////////////////////////////////
     /// Textures
     ////////////////////////////////////////////////////////////
-    ctk::data *TextureMap = ctk::At(&AssetData, "textures");
+    ctk::data *TextureMap = ctk::at(&AssetData, "textures");
     for(u32 TextureIndex = 0; TextureIndex < TextureMap->Children.Count; ++TextureIndex)
     {
-        ctk::data *TextureData = ctk::At(TextureMap, TextureIndex);
+        ctk::data *TextureData = ctk::at(TextureMap, TextureIndex);
         vtk::texture_info TextureInfo = {};
-        TextureInfo.Filter = vtk::GetVkFilter(ctk::CStr(TextureData, "filter"));
-        ctk::Push(&Assets->Textures, TextureData->Key.Data,
-                  vtk::CreateTexture(Device, VulkanInstance->GraphicsCommandPool, &VulkanInstance->StagingRegion,
-                                     ctk::CStr(TextureData, "path"), &TextureInfo));
+        TextureInfo.Filter = vtk::get_vk_filter(ctk::to_cstr(TextureData, "filter"));
+        ctk::push(&Assets->Textures, TextureData->Key.Data,
+                  vtk::create_texture(Device, VulkanInstance->GraphicsCommandPool, &VulkanInstance->StagingRegion,
+                                      ctk::to_cstr(TextureData, "path"), &TextureInfo));
     }
 
     ////////////////////////////////////////////////////////////
     /// Shader Modules
     ////////////////////////////////////////////////////////////
-    ctk::data *ShaderModuleMap = ctk::At(&AssetData, "shader_modules");
+    ctk::data *ShaderModuleMap = ctk::at(&AssetData, "shader_modules");
     for(u32 ShaderModuleIndex = 0; ShaderModuleIndex < ShaderModuleMap->Children.Count; ++ShaderModuleIndex)
     {
-        ctk::data *ShaderModuleData = ctk::At(ShaderModuleMap, ShaderModuleIndex);
-        VkShaderStageFlagBits Stage = vtk::GetVkShaderStageFlagBits(ctk::CStr(ShaderModuleData, "stage"));
-        ctk::Push(&Assets->ShaderModules, ShaderModuleData->Key.Data,
-                  vtk::CreateShaderModule(Device->Logical, ctk::CStr(ShaderModuleData, "path"), Stage));
+        ctk::data *ShaderModuleData = ctk::at(ShaderModuleMap, ShaderModuleIndex);
+        VkShaderStageFlagBits Stage = vtk::get_vk_shader_stage_flag_bits(ctk::to_cstr(ShaderModuleData, "stage"));
+        ctk::push(&Assets->ShaderModules, ShaderModuleData->Key.Data,
+                  vtk::create_shader_module(Device->Logical, ctk::to_cstr(ShaderModuleData, "path"), Stage));
     }
 
     ////////////////////////////////////////////////////////////
     /// Meshes
     ////////////////////////////////////////////////////////////
-    ctk::data *ModelMap = ctk::At(&AssetData, "models");
+    ctk::data *ModelMap = ctk::at(&AssetData, "models");
     for(u32 ModelIndex = 0; ModelIndex < ModelMap->Children.Count; ++ModelIndex)
     {
-        ctk::data *ModelData = ctk::At(ModelMap, ModelIndex);
-        ctk::Push(&Assets->Meshes, ModelData->Key.Data, create_mesh(VulkanInstance, ctk::CStr(ModelData, "path")));
+        ctk::data *ModelData = ctk::at(ModelMap, ModelIndex);
+        ctk::push(&Assets->Meshes, ModelData->Key.Data, create_mesh(VulkanInstance, ctk::to_cstr(ModelData, "path")));
     }
 
     ////////////////////////////////////////////////////////////
@@ -510,7 +510,7 @@ create_assets(vulkan_instance *VulkanInstance)
 vulkan_state *
 create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
 {
-    auto VulkanState = ctk::Alloc<vulkan_state>();
+    auto VulkanState = ctk::allocate<vulkan_state>();
     *VulkanState = {};
 
     vtk::device *Device = &VulkanInstance->Device;
@@ -523,29 +523,29 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
     auto *DescriptorSets = &VulkanState->DescriptorSets;
     auto *VertexAttributeIndexes = &VulkanState->VertexAttributeIndexes;
 
-    ctk::data VulkanStateData = ctk::LoadData("assets/data/vulkan_state.ctkd");
+    ctk::data VulkanStateData = ctk::load_data("assets/data/vulkan_state.ctkd");
 
     ////////////////////////////////////////////////////////////
     /// Predefined State
     ////////////////////////////////////////////////////////////
-    ctk::Todo("using frame count instead of swapchain image count");
+    ctk::todo("using frame count instead of swapchain image count");
 
     // Uniform Buffers
-    ctk::Push(UniformBuffers, "entity",
-              vtk::CreateUniformBuffer(&VulkanInstance->HostBuffer, 64, sizeof(entity_ubo), FrameState->Frames.Count));
-    ctk::Push(UniformBuffers, "light",
-              vtk::CreateUniformBuffer(&VulkanInstance->HostBuffer, 64, sizeof(light_ubo), FrameState->Frames.Count));
+    ctk::push(UniformBuffers, "entity",
+              vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, 64, sizeof(entity_ubo), FrameState->Frames.Count));
+    ctk::push(UniformBuffers, "light",
+              vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, 64, sizeof(light_ubo), FrameState->Frames.Count));
 
     // Depth Image
     vtk::image_info DepthImageInfo = {};
     DepthImageInfo.Width = Swapchain->Extent.width;
     DepthImageInfo.Height = Swapchain->Extent.height;
-    DepthImageInfo.Format = vtk::FindDepthImageFormat(Device->Physical);
+    DepthImageInfo.Format = vtk::find_depth_image_format(Device->Physical);
     DepthImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
     DepthImageInfo.UsageFlags = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     DepthImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     DepthImageInfo.AspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    VulkanState->DepthImage = vtk::CreateImage(Device, &DepthImageInfo);
+    VulkanState->DepthImage = vtk::create_image(Device, &DepthImageInfo);
 
     // Render Passes
     create_render_passes(VulkanInstance, Assets, VulkanState);
@@ -556,30 +556,30 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
 
     // Descriptor Infos
     ctk::smap<vtk::descriptor_info, 8> DescriptorInfos = {};
-    ctk::data *DescriptorMap = ctk::At(&VulkanStateData, "descriptors");
+    ctk::data *DescriptorMap = ctk::at(&VulkanStateData, "descriptors");
     for(u32 DescriptorIndex = 0; DescriptorIndex < DescriptorMap->Children.Count; ++DescriptorIndex)
     {
-        ctk::data *DescriptorData = ctk::At(DescriptorMap, DescriptorIndex);
-        ctk::data *ShaderStageFlagsArray = ctk::At(DescriptorData, "shader_stage_flags");
-        VkDescriptorType Type = vtk::GetVkDescriptorType(ctk::CStr(DescriptorData, "type"));
+        ctk::data *DescriptorData = ctk::at(DescriptorMap, DescriptorIndex);
+        ctk::data *ShaderStageFlagsArray = ctk::at(DescriptorData, "shader_stage_flags");
+        VkDescriptorType Type = vtk::get_vk_descriptor_type(ctk::to_cstr(DescriptorData, "type"));
         VkShaderStageFlags ShaderStageFlags = 0;
         for(u32 ShaderStageIndex = 0; ShaderStageIndex < ShaderStageFlagsArray->Children.Count; ++ShaderStageIndex)
         {
-            ShaderStageFlags |= vtk::GetVkShaderStageFlagBits(ctk::CStr(ShaderStageFlagsArray, ShaderStageIndex));
+            ShaderStageFlags |= vtk::get_vk_shader_stage_flag_bits(ctk::to_cstr(ShaderStageFlagsArray, ShaderStageIndex));
         }
 
-        vtk::descriptor_info* DescriptorInfo = ctk::Push(&DescriptorInfos, DescriptorData->Key.Data);
+        vtk::descriptor_info* DescriptorInfo = ctk::push(&DescriptorInfos, DescriptorData->Key.Data);
         DescriptorInfo->Type = Type;
         DescriptorInfo->ShaderStageFlags = ShaderStageFlags;
-        DescriptorInfo->Count = ctk::U32(DescriptorData, "count");
+        DescriptorInfo->Count = ctk::to_u32(DescriptorData, "count");
         if(Type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
            Type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC)
         {
-            DescriptorInfo->UniformBuffer = ctk::At(UniformBuffers, ctk::CStr(DescriptorData, "uniform_buffer"));
+            DescriptorInfo->UniformBuffer = ctk::at(UniformBuffers, ctk::to_cstr(DescriptorData, "uniform_buffer"));
         }
         else if(Type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
         {
-            DescriptorInfo->Texture = ctk::At(&Assets->Textures, ctk::CStr(DescriptorData, "texture"));
+            DescriptorInfo->Texture = ctk::at(&Assets->Textures, ctk::to_cstr(DescriptorData, "texture"));
         }
         else
         {
@@ -589,89 +589,89 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
 
     // Descriptor Set Infos
     ctk::smap<vtk::descriptor_set_info, 8> DescriptorSetInfos = {};
-    ctk::data *DescriptorSetMap = ctk::At(&VulkanStateData, "descriptor_sets");
+    ctk::data *DescriptorSetMap = ctk::at(&VulkanStateData, "descriptor_sets");
     for(u32 DescriptorSetIndex = 0; DescriptorSetIndex < DescriptorSetMap->Children.Count; ++DescriptorSetIndex)
     {
-        ctk::data *DescriptorSetData = ctk::At(DescriptorSetMap, DescriptorSetIndex);
-        vtk::descriptor_set_info *DescriptorSetInfo = ctk::Push(&DescriptorSetInfos, DescriptorSetData->Key.Data);
-        b32 IsDynamic = ctk::StringEqual(ctk::CStr(DescriptorSetData, "type"), "dynamic");
-        ctk::Todo("using frame count instead of swapchain image count");
+        ctk::data *DescriptorSetData = ctk::at(DescriptorSetMap, DescriptorSetIndex);
+        vtk::descriptor_set_info *DescriptorSetInfo = ctk::push(&DescriptorSetInfos, DescriptorSetData->Key.Data);
+        b32 IsDynamic = ctk::equal(ctk::to_cstr(DescriptorSetData, "type"), "dynamic");
+        ctk::todo("using frame count instead of swapchain image count");
         DescriptorSetInfo->InstanceCount = IsDynamic ? FrameState->Frames.Count : 1;
-        ctk::data *DescriptorBindingArray = ctk::At(DescriptorSetData, "descriptor_bindings");
+        ctk::data *DescriptorBindingArray = ctk::at(DescriptorSetData, "descriptor_bindings");
         for(u32 DescriptorBindingIndex = 0; DescriptorBindingIndex < DescriptorBindingArray->Children.Count; ++DescriptorBindingIndex)
         {
-            ctk::data *DescriptorBindingData = ctk::At(DescriptorBindingArray, DescriptorBindingIndex);
-            ctk::Push(&DescriptorSetInfo->DescriptorBindings,
+            ctk::data *DescriptorBindingData = ctk::at(DescriptorBindingArray, DescriptorBindingIndex);
+            ctk::push(&DescriptorSetInfo->DescriptorBindings,
                       {
-                          ctk::U32(DescriptorBindingData, "binding"),
-                          ctk::At(&DescriptorInfos, ctk::CStr(DescriptorBindingData, "descriptor")),
+                          ctk::to_u32(DescriptorBindingData, "binding"),
+                          ctk::at(&DescriptorInfos, ctk::to_cstr(DescriptorBindingData, "descriptor")),
                       });
         }
     }
 
     // Pool
-    *DescriptorPool = vtk::CreateDescriptorPool(Device->Logical, DescriptorSetInfos.Values, DescriptorSetInfos.Count);
+    *DescriptorPool = vtk::create_descriptor_pool(Device->Logical, DescriptorSetInfos.Values, DescriptorSetInfos.Count);
 
     // Mirror descriptor set infos map to store descriptor sets.
     for(u32 DescriptorSetIndex = 0; DescriptorSetIndex < DescriptorSetInfos.Count; ++DescriptorSetIndex)
     {
-        ctk::Push(DescriptorSets, DescriptorSetInfos.Keys[DescriptorSetIndex]);
+        ctk::push(DescriptorSets, DescriptorSetInfos.Keys[DescriptorSetIndex]);
     }
-    vtk::CreateDescriptorSets(Device->Logical, *DescriptorPool, DescriptorSetInfos.Values, DescriptorSetInfos.Count, DescriptorSets->Values);
+    vtk::create_descriptor_sets(Device->Logical, *DescriptorPool, DescriptorSetInfos.Values, DescriptorSetInfos.Count, DescriptorSets->Values);
 
     ////////////////////////////////////////////////////////////
     /// Vertex Layout
     ////////////////////////////////////////////////////////////
-    ctk::data *VertexLayoutMap = ctk::At(&VulkanStateData, "vertex_layout");
+    ctk::data *VertexLayoutMap = ctk::at(&VulkanStateData, "vertex_layout");
     for(u32 VertexAttributeIndex = 0; VertexAttributeIndex < VertexLayoutMap->Children.Count; ++VertexAttributeIndex)
     {
-        ctk::data *VertexAttributeData = ctk::At(VertexLayoutMap, VertexAttributeIndex);
-        ctk::Push(VertexAttributeIndexes, VertexAttributeData->Key.Data,
-                  vtk::PushVertexAttribute(VertexLayout, ctk::U32(VertexAttributeData, "element_count")));
+        ctk::data *VertexAttributeData = ctk::at(VertexLayoutMap, VertexAttributeIndex);
+        ctk::push(VertexAttributeIndexes, VertexAttributeData->Key.Data,
+                  vtk::push_vertex_attribute(VertexLayout, ctk::to_u32(VertexAttributeData, "element_count")));
     }
 
     ////////////////////////////////////////////////////////////
     /// Graphics Pipelines
     ////////////////////////////////////////////////////////////
-    ctk::data *GraphicsPipelineMap = ctk::At(&VulkanStateData, "graphics_pipelines");
+    ctk::data *GraphicsPipelineMap = ctk::at(&VulkanStateData, "graphics_pipelines");
     for(u32 GraphicsPipelineIndex = 0; GraphicsPipelineIndex < GraphicsPipelineMap->Children.Count; ++GraphicsPipelineIndex)
     {
-        ctk::data *GraphicsPipelineData = ctk::At(GraphicsPipelineMap, GraphicsPipelineIndex);
-        ctk::data *ShaderModuleArray = ctk::At(GraphicsPipelineData, "shader_modules");
-        ctk::data *DescriptorSetLayoutArray = ctk::At(GraphicsPipelineData, "descriptor_set_layouts");
-        ctk::data *VertexInputArray = ctk::At(GraphicsPipelineData, "vertex_inputs");
+        ctk::data *GraphicsPipelineData = ctk::at(GraphicsPipelineMap, GraphicsPipelineIndex);
+        ctk::data *ShaderModuleArray = ctk::at(GraphicsPipelineData, "shader_modules");
+        ctk::data *DescriptorSetLayoutArray = ctk::at(GraphicsPipelineData, "descriptor_set_layouts");
+        ctk::data *VertexInputArray = ctk::at(GraphicsPipelineData, "vertex_inputs");
         vtk::graphics_pipeline_info GraphicsPipelineInfo = {};
         for(u32 ShaderModuleIndex = 0; ShaderModuleIndex < ShaderModuleArray->Children.Count; ++ShaderModuleIndex)
         {
-            ctk::Push(&GraphicsPipelineInfo.ShaderModules,
-                      ctk::At(&Assets->ShaderModules, ctk::CStr(ShaderModuleArray, ShaderModuleIndex)));
+            ctk::push(&GraphicsPipelineInfo.ShaderModules,
+                      ctk::at(&Assets->ShaderModules, ctk::to_cstr(ShaderModuleArray, ShaderModuleIndex)));
         }
         for(u32 DescriptorSetLayoutIndex = 0; DescriptorSetLayoutIndex < DescriptorSetLayoutArray->Children.Count;
             ++DescriptorSetLayoutIndex)
         {
-            ctk::Push(&GraphicsPipelineInfo.DescriptorSetLayouts,
-                      ctk::At(DescriptorSets, ctk::CStr(DescriptorSetLayoutArray, DescriptorSetLayoutIndex))->Layout);
+            ctk::push(&GraphicsPipelineInfo.DescriptorSetLayouts,
+                      ctk::at(DescriptorSets, ctk::to_cstr(DescriptorSetLayoutArray, DescriptorSetLayoutIndex))->Layout);
         }
         for(u32 VertexInputIndex = 0; VertexInputIndex < VertexInputArray->Children.Count; ++VertexInputIndex)
         {
-            ctk::data *VertexInputData = ctk::At(VertexInputArray, VertexInputIndex);
-            ctk::Push(&GraphicsPipelineInfo.VertexInputs,
+            ctk::data *VertexInputData = ctk::at(VertexInputArray, VertexInputIndex);
+            ctk::push(&GraphicsPipelineInfo.VertexInputs,
                       {
-                          ctk::U32(VertexInputData, "binding"),
-                          ctk::U32(VertexInputData, "location"),
-                          *ctk::At(VertexAttributeIndexes, ctk::CStr(VertexInputData, "attribute"))
+                          ctk::to_u32(VertexInputData, "binding"),
+                          ctk::to_u32(VertexInputData, "location"),
+                          *ctk::at(VertexAttributeIndexes, ctk::to_cstr(VertexInputData, "attribute"))
                       });
         }
         GraphicsPipelineInfo.VertexLayout = VertexLayout;
         GraphicsPipelineInfo.ViewportExtent = Swapchain->Extent;
-        GraphicsPipelineInfo.PrimitiveTopology = vtk::GetVkPrimitiveTopology(ctk::CStr(GraphicsPipelineData, "primitive_topology"));
-        GraphicsPipelineInfo.DepthTesting = vtk::GetVkBool32(ctk::CStr(GraphicsPipelineData, "depth_testing"));
-        vtk::render_pass *RenderPass = At(&VulkanState->RenderPasses, ctk::CStr(GraphicsPipelineData, "render_pass"));
-        ctk::Push(&VulkanState->GraphicsPipelines, GraphicsPipelineData->Key.Data,
-                  vtk::CreateGraphicsPipeline(Device->Logical, RenderPass, &GraphicsPipelineInfo));
+        GraphicsPipelineInfo.PrimitiveTopology = vtk::get_vk_primitive_topology(ctk::to_cstr(GraphicsPipelineData, "primitive_topology"));
+        GraphicsPipelineInfo.DepthTesting = vtk::get_vk_bool_32(ctk::to_cstr(GraphicsPipelineData, "depth_testing"));
+        vtk::render_pass *RenderPass = ctk::at(&VulkanState->RenderPasses, ctk::to_cstr(GraphicsPipelineData, "render_pass"));
+        ctk::push(&VulkanState->GraphicsPipelines, GraphicsPipelineData->Key.Data,
+                  vtk::create_graphics_pipeline(Device->Logical, RenderPass, &GraphicsPipelineInfo));
     }
 
-    VulkanState->DeferredRenderingFinishedSemaphore = vtk::CreateSemaphore(Device->Logical);
+    VulkanState->DeferredRenderingFinishedSemaphore = vtk::create_semaphore(Device->Logical);
 
     return VulkanState;
 }
@@ -713,8 +713,8 @@ update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene)
 
     // Write all entity ubos to current frame's entity uniform buffer region.
     vtk::region *EntityUniformBufferRegion = Scene->EntityUniformBuffer->Regions + VulkanInstance->FrameState.CurrentFrameIndex;
-    vtk::WriteToHostRegion(VulkanInstance->Device.Logical, EntityUniformBufferRegion,
-                           Scene->EntityUBOs.Data, ctk::ByteCount(&Scene->EntityUBOs), 0);
+    vtk::write_to_host_region(VulkanInstance->Device.Logical, EntityUniformBufferRegion,
+                              Scene->EntityUBOs.Data, ctk::byte_count(&Scene->EntityUBOs), 0);
 }
 
 // void
@@ -723,7 +723,7 @@ update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene)
 //     vtk::device *Device = &VulkanInstance->Device;
 //     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
 //     vtk::frame_state *FrameState = &VulkanInstance->FrameState;
-//     vtk::render_pass *DirectRenderPass = ctk::At(&VulkanInstance->RenderPasses, "direct");
+//     vtk::render_pass *DirectRenderPass = ctk::at(&VulkanInstance->RenderPasses, "direct");
 
 //     VkRect2D RenderArea = {};
 //     RenderArea.offset.x = 0;
@@ -735,16 +735,16 @@ update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene)
 //     CommandBufferBeginInfo.flags = 0;
 //     CommandBufferBeginInfo.pInheritanceInfo = NULL;
 
-//     ctk::Todo("using frame count instead of swapchain image count");
+//     ctk::todo("using frame count instead of swapchain image count");
 //     for(u32 FrameIndex = 0; FrameIndex < FrameState->Frames.Count; ++FrameIndex)
 //     {
-//         VkCommandBuffer CommandBuffer = *At(&DirectRenderPass->CommandBuffers, FrameIndex);
-//         vtk::ValidateVkResult(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
-//                               "vkBeginCommandBuffer", "failed to begin recording command buffer");
+//         VkCommandBuffer CommandBuffer = *ctk::at(&DirectRenderPass->CommandBuffers, FrameIndex);
+//         vtk::validate_vk_result(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
+//                                 "vkBeginCommandBuffer", "failed to begin recording command buffer");
 //         VkRenderPassBeginInfo RenderPassBeginInfo = {};
 //         RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 //         RenderPassBeginInfo.renderPass = DirectRenderPass->Handle;
-//         RenderPassBeginInfo.framebuffer = *At(&DirectRenderPass->Framebuffers, FrameIndex);
+//         RenderPassBeginInfo.framebuffer = *ctk::at(&DirectRenderPass->Framebuffers, FrameIndex);
 //         RenderPassBeginInfo.renderArea = RenderArea;
 //         RenderPassBeginInfo.clearValueCount = DirectRenderPass->ClearValues.Count;
 //         RenderPassBeginInfo.pClearValues = DirectRenderPass->ClearValues.Data;
@@ -764,7 +764,7 @@ update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene)
 //             vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, Entity->GraphicsPipeline->Handle);
 
 //             // Descriptor Sets
-//             vtk::BindDescriptorSets(CommandBuffer, Entity->GraphicsPipeline->Layout,
+//             vtk::bind_descriptor_sets(CommandBuffer, Entity->GraphicsPipeline->Layout,
 //                                     Entity->DescriptorSets.Data, Entity->DescriptorSets.Count,
 //                                     FrameIndex, EntityIndex);
 
@@ -778,7 +778,7 @@ update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene)
 
 //         // End
 //         vkCmdEndRenderPass(CommandBuffer);
-//         vtk::ValidateVkResult(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
+//         vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
 //     }
 // }
 
@@ -788,7 +788,7 @@ record_deferred_render_pass(vulkan_instance *VulkanInstance, vulkan_state *Vulka
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
     vtk::frame_state *FrameState = &VulkanInstance->FrameState;
-    vtk::render_pass *DeferredRenderPass = ctk::At(&VulkanState->RenderPasses, "deferred");
+    vtk::render_pass *DeferredRenderPass = ctk::at(&VulkanState->RenderPasses, "deferred");
 
     VkRect2D RenderArea = {};
     RenderArea.offset.x = 0;
@@ -800,13 +800,13 @@ record_deferred_render_pass(vulkan_instance *VulkanInstance, vulkan_state *Vulka
     CommandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
     CommandBufferBeginInfo.pInheritanceInfo = NULL;
 
-    VkCommandBuffer CommandBuffer = *At(&DeferredRenderPass->CommandBuffers, 0);
-    vtk::ValidateVkResult(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
-                          "vkBeginCommandBuffer", "failed to begin recording command buffer");
+    VkCommandBuffer CommandBuffer = *ctk::at(&DeferredRenderPass->CommandBuffers, 0);
+    vtk::validate_vk_result(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
+                            "vkBeginCommandBuffer", "failed to begin recording command buffer");
     VkRenderPassBeginInfo RenderPassBeginInfo = {};
     RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     RenderPassBeginInfo.renderPass = DeferredRenderPass->Handle;
-    RenderPassBeginInfo.framebuffer = *At(&DeferredRenderPass->Framebuffers, 0);
+    RenderPassBeginInfo.framebuffer = *ctk::at(&DeferredRenderPass->Framebuffers, 0);
     RenderPassBeginInfo.renderArea = RenderArea;
     RenderPassBeginInfo.clearValueCount = DeferredRenderPass->ClearValues.Count;
     RenderPassBeginInfo.pClearValues = DeferredRenderPass->ClearValues.Data;
@@ -821,9 +821,9 @@ record_deferred_render_pass(vulkan_instance *VulkanInstance, vulkan_state *Vulka
             vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, Entity->GraphicsPipeline->Handle);
 
             // Descriptor Sets
-            vtk::BindDescriptorSets(CommandBuffer, Entity->GraphicsPipeline->Layout,
-                                    Entity->DescriptorSets.Data, Entity->DescriptorSets.Count,
-                                    0, EntityIndex);
+            vtk::bind_descriptor_sets(CommandBuffer, Entity->GraphicsPipeline->Layout,
+                                      Entity->DescriptorSets.Data, Entity->DescriptorSets.Count,
+                                      0, EntityIndex);
 
             // Vertex/Index Buffers
             vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh->VertexRegion.Buffer->Handle, &Mesh->VertexRegion.Offset);
@@ -833,7 +833,7 @@ record_deferred_render_pass(vulkan_instance *VulkanInstance, vulkan_state *Vulka
             vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
         }
     vkCmdEndRenderPass(CommandBuffer);
-    vtk::ValidateVkResult(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
+    vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
 }
 
 void
@@ -841,7 +841,7 @@ record_lighting_render_pass(vulkan_instance *VulkanInstance, vulkan_state *Vulka
 {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
-    vtk::render_pass *LightingRenderPass = ctk::At(&VulkanState->RenderPasses, "lighting");
+    vtk::render_pass *LightingRenderPass = ctk::at(&VulkanState->RenderPasses, "lighting");
 
     VkRect2D RenderArea = {};
     RenderArea.offset.x = 0;
@@ -853,19 +853,19 @@ record_lighting_render_pass(vulkan_instance *VulkanInstance, vulkan_state *Vulka
     CommandBufferBeginInfo.flags = 0;
     CommandBufferBeginInfo.pInheritanceInfo = NULL;
 
-    mesh *Mesh = ctk::At(&Assets->Meshes, "fullscreen_plane");
-    vtk::graphics_pipeline *GraphicsPipeline = ctk::At(&VulkanState->GraphicsPipelines, "lighting");
-    vtk::descriptor_set *DescriptorSet = ctk::At(&VulkanState->DescriptorSets, "deferred_textures");
+    mesh *Mesh = ctk::at(&Assets->Meshes, "fullscreen_plane");
+    vtk::graphics_pipeline *GraphicsPipeline = ctk::at(&VulkanState->GraphicsPipelines, "lighting");
+    vtk::descriptor_set *DescriptorSet = ctk::at(&VulkanState->DescriptorSets, "deferred_textures");
 
     for(u32 SwapchainImageIndex = 0; SwapchainImageIndex < Swapchain->Images.Count; ++SwapchainImageIndex)
     {
-        VkCommandBuffer CommandBuffer = *At(&LightingRenderPass->CommandBuffers, SwapchainImageIndex);
-        vtk::ValidateVkResult(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
-                              "vkBeginCommandBuffer", "failed to begin recording command buffer");
+        VkCommandBuffer CommandBuffer = *ctk::at(&LightingRenderPass->CommandBuffers, SwapchainImageIndex);
+        vtk::validate_vk_result(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
+                                "vkBeginCommandBuffer", "failed to begin recording command buffer");
         VkRenderPassBeginInfo RenderPassBeginInfo = {};
         RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         RenderPassBeginInfo.renderPass = LightingRenderPass->Handle;
-        RenderPassBeginInfo.framebuffer = *At(&LightingRenderPass->Framebuffers, SwapchainImageIndex);
+        RenderPassBeginInfo.framebuffer = *ctk::at(&LightingRenderPass->Framebuffers, SwapchainImageIndex);
         RenderPassBeginInfo.renderArea = RenderArea;
         RenderPassBeginInfo.clearValueCount = LightingRenderPass->ClearValues.Count;
         RenderPassBeginInfo.pClearValues = LightingRenderPass->ClearValues.Data;
@@ -875,7 +875,7 @@ record_lighting_render_pass(vulkan_instance *VulkanInstance, vulkan_state *Vulka
             vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, GraphicsPipeline->Handle);
 
             // Descriptor Sets
-            vtk::BindDescriptorSets(CommandBuffer, GraphicsPipeline->Layout, &DescriptorSet, 1, 0, 0);
+            vtk::bind_descriptor_sets(CommandBuffer, GraphicsPipeline->Layout, &DescriptorSet, 1, 0, 0);
 
             // Vertex/Index Buffers
             vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh->VertexRegion.Buffer->Handle, &Mesh->VertexRegion.Offset);
@@ -884,7 +884,7 @@ record_lighting_render_pass(vulkan_instance *VulkanInstance, vulkan_state *Vulka
             // Draw
             vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
         vkCmdEndRenderPass(CommandBuffer);
-        vtk::ValidateVkResult(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
+        vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
     }
 }
 
@@ -905,7 +905,7 @@ render(vulkan_instance *VulkanInstance, vulkan_state *VulkanState)
     {
         VkResult Result = vkAcquireNextImageKHR(Device->Logical, Swapchain->Handle, UINT64_MAX, CurrentFrame->ImageAquiredSemaphore,
                                                 VK_NULL_HANDLE, &SwapchainImageIndex);
-        vtk::ValidateVkResult(Result, "vkAcquireNextImageKHR", "failed to aquire next swapchain image");
+        vtk::validate_vk_result(Result, "vkAcquireNextImageKHR", "failed to aquire next swapchain image");
     }
 
     // Wait on swapchain images previously associated frame fence before rendering.
@@ -927,7 +927,7 @@ render(vulkan_instance *VulkanInstance, vulkan_state *VulkanState)
     VkSemaphore DeferredSignalSemaphores[] = { VulkanState->DeferredRenderingFinishedSemaphore };
     VkCommandBuffer DeferredCommandBuffers[] =
     {
-        *ctk::At(&ctk::At(&VulkanState->RenderPasses, "deferred")->CommandBuffers, 0),
+        *ctk::at(&ctk::at(&VulkanState->RenderPasses, "deferred")->CommandBuffers, 0),
     };
 
     // Submit Lighting Command Buffer
@@ -936,7 +936,7 @@ render(vulkan_instance *VulkanInstance, vulkan_state *VulkanState)
     VkSemaphore LightingSignalSemaphores[] = { CurrentFrame->RenderFinishedSemaphore };
     VkCommandBuffer LightingCommandBuffers[] =
     {
-        *ctk::At(&ctk::At(&VulkanState->RenderPasses, "lighting")->CommandBuffers, SwapchainImageIndex),
+        *ctk::at(&ctk::at(&VulkanState->RenderPasses, "lighting")->CommandBuffers, SwapchainImageIndex),
     };
 
     VkSubmitInfo SubmitInfos[2] = {};
@@ -961,8 +961,8 @@ render(vulkan_instance *VulkanInstance, vulkan_state *VulkanState)
     SubmitInfos[1].signalSemaphoreCount = CTK_ARRAY_COUNT(LightingSignalSemaphores);
     SubmitInfos[1].pSignalSemaphores = LightingSignalSemaphores;
 
-    vtk::ValidateVkResult(vkQueueSubmit(Device->GraphicsQueue, CTK_ARRAY_COUNT(SubmitInfos), SubmitInfos, CurrentFrame->InFlightFence),
-                          "vkQueueSubmit", "failed to submit command buffer to graphics queue");
+    vtk::validate_vk_result(vkQueueSubmit(Device->GraphicsQueue, CTK_ARRAY_COUNT(SubmitInfos), SubmitInfos, CurrentFrame->InFlightFence),
+                            "vkQueueSubmit", "failed to submit command buffer to graphics queue");
 
     ////////////////////////////////////////////////////////////
     /// Presentation
@@ -983,8 +983,8 @@ render(vulkan_instance *VulkanInstance, vulkan_state *VulkanState)
     PresentInfo.pResults = NULL;
 
     // Submit Swapchains to present queue for presentation once rendering is complete.
-    vtk::ValidateVkResult(vkQueuePresentKHR(Device->PresentQueue, &PresentInfo), "vkQueuePresentKHR",
-                          "failed to queue image for presentation");
+    vtk::validate_vk_result(vkQueuePresentKHR(Device->PresentQueue, &PresentInfo), "vkQueuePresentKHR",
+                            "failed to queue image for presentation");
 
     // Cycle frame.
     FrameState->CurrentFrameIndex = (FrameState->CurrentFrameIndex + 1) % FrameState->Frames.Count;

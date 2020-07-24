@@ -8,7 +8,7 @@
 static ctk::vec3<f32>
 load_vec3(ctk::data *Data)
 {
-    return { ctk::F32(Data, 0u), ctk::F32(Data, 1u), ctk::F32(Data, 2u) };
+    return { ctk::to_f32(Data, 0u), ctk::to_f32(Data, 1u), ctk::to_f32(Data, 2u) };
 }
 
 static transform
@@ -21,9 +21,9 @@ load_transform(ctk::data *Data)
     }
     else
     {
-        Transform.Position = load_vec3(At(Data, "position"));
-        Transform.Rotation = load_vec3(At(Data, "rotation"));
-        Transform.Scale = load_vec3(At(Data, "scale"));
+        Transform.Position = load_vec3(ctk::at(Data, "position"));
+        Transform.Rotation = load_vec3(ctk::at(Data, "rotation"));
+        Transform.Scale = load_vec3(ctk::at(Data, "scale"));
     }
     return Transform;
 }
@@ -31,51 +31,52 @@ load_transform(ctk::data *Data)
 static scene *
 create_scene(vulkan_state *VulkanState, assets *Assets, cstr Path)
 {
-    scene *Scene = ctk::Alloc<scene>();
+    scene *Scene = ctk::allocate<scene>();
     *Scene = {};
 
-    ctk::data SceneData = ctk::LoadData(Path);
+    ctk::data SceneData = ctk::load_data(Path);
 
     // Camera
-    ctk::data *CameraData = ctk::At(&SceneData, "camera");
-    Scene->Camera.Transform = load_transform(ctk::At(CameraData, "transform"));
-    Scene->Camera.FieldOfView = ctk::F32(CameraData, "field_of_view");
+    ctk::data *CameraData = ctk::at(&SceneData, "camera");
+    Scene->Camera.Transform = load_transform(ctk::at(CameraData, "transform"));
+    Scene->Camera.FieldOfView = ctk::to_f32(CameraData, "field_of_view");
 
     // Entities
-    ctk::data *EntityMap = ctk::At(&SceneData, "entities");
+    ctk::data *EntityMap = ctk::at(&SceneData, "entities");
     for(u32 EntityIndex = 0; EntityIndex < EntityMap->Children.Count; ++EntityIndex)
     {
-        ctk::data *EntityData = ctk::At(EntityMap, EntityIndex);
-        entity *Entity = ctk::Push(&Scene->Entities, EntityData->Key.Data);
-        ctk::Push(&Scene->EntityUBOs);
+        ctk::data *EntityData = ctk::at(EntityMap, EntityIndex);
+        entity *Entity = ctk::push(&Scene->Entities, EntityData->Key.Data);
+        ctk::push(&Scene->EntityUBOs);
 
         // Transform
-        Entity->Transform = load_transform(ctk::At(EntityData, "transform"));
+        Entity->Transform = load_transform(ctk::at(EntityData, "transform"));
 
         // Descriptor Sets (optional)
-        ctk::data *DescriptorSetArray = ctk::Find(EntityData, "descriptor_sets");
+        ctk::data *DescriptorSetArray = ctk::find(EntityData, "descriptor_sets");
         if(DescriptorSetArray)
         {
             for(u32 DescriptorSetIndex = 0; DescriptorSetIndex < DescriptorSetArray->Children.Count; ++DescriptorSetIndex)
             {
-                ctk::Push(&Entity->DescriptorSets, At(&VulkanState->DescriptorSets, ctk::CStr(DescriptorSetArray, DescriptorSetIndex)));
+                ctk::push(&Entity->DescriptorSets, ctk::at(&VulkanState->DescriptorSets, ctk::to_cstr(DescriptorSetArray,
+                                                                                                      DescriptorSetIndex)));
             }
         }
 
         // Graphics Pipeline (optional)
-        ctk::data *GraphicsPipelineName = ctk::Find(EntityData, "graphics_pipeline");
+        ctk::data *GraphicsPipelineName = ctk::find(EntityData, "graphics_pipeline");
         if(GraphicsPipelineName)
         {
-            Entity->GraphicsPipeline = ctk::At(&VulkanState->GraphicsPipelines, ctk::CStr(GraphicsPipelineName));
+            Entity->GraphicsPipeline = ctk::at(&VulkanState->GraphicsPipelines, ctk::to_cstr(GraphicsPipelineName));
         }
 
         // Mesh
-        Entity->Mesh = ctk::At(&Assets->Meshes, ctk::CStr(EntityData, "mesh"));
+        Entity->Mesh = ctk::at(&Assets->Meshes, ctk::to_cstr(EntityData, "mesh"));
     }
-    Scene->EntityUniformBuffer = ctk::At(&VulkanState->UniformBuffers, "entity");
+    Scene->EntityUniformBuffer = ctk::at(&VulkanState->UniformBuffers, "entity");
 
     // Cleanup
-    ctk::Free(&SceneData);
+    ctk::_free(&SceneData);
 
     return Scene;
 }
@@ -139,7 +140,7 @@ camera_controls(transform *CameraTransform, input_state *InputState)
         static const f32 SENS = 0.4f;
         CameraTransform->Rotation.X += InputState->MouseDelta.Y * SENS;
         CameraTransform->Rotation.Y -= InputState->MouseDelta.X * SENS;
-        CameraTransform->Rotation.X = ctk::Clamp(CameraTransform->Rotation.X, -80.0f, 80.0f);
+        CameraTransform->Rotation.X = ctk::clamp(CameraTransform->Rotation.X, -80.0f, 80.0f);
     }
 
     // Translation
