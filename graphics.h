@@ -80,7 +80,6 @@ struct vulkan_state
     ctk::smap<vtk::graphics_pipeline, 16> GraphicsPipelines;
     vtk::image DepthImage;
     ctk::smap<vtk::render_pass, 4> RenderPasses;
-    VkSemaphore DeferredRenderingFinishedSemaphore;
 };
 
 struct entity_ubo
@@ -146,14 +145,8 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets);
 void
 update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene);
 
-// void
-// record_direct_render_pass(vulkan_instance *VulkanInstance, scene *Scene);
-
 void
-record_deferred_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, scene *Scene);
-
-void
-record_lighting_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, assets *Assets);
+record_direct_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, scene *Scene);
 
 void
 render(vulkan_instance *VulkanInstance, vulkan_state *VulkanState);

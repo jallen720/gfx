@@ -169,9 +169,8 @@ main()
     assets *Assets = create_assets(VulkanInstance);
     vulkan_state *VulkanState = create_vulkan_state(VulkanInstance, Assets);
 
-    scene *Scene = create_scene(VulkanState, Assets, "assets/scenes/deferred.ctkd");
-    record_deferred_render_pass(VulkanInstance, VulkanState, Scene);
-    record_lighting_render_pass(VulkanInstance, VulkanState, Assets);
+    scene *Scene = create_scene(VulkanState, Assets, "assets/scenes/test_scene.ctkd");
+    record_direct_render_pass(VulkanInstance, VulkanState, Scene);
     while(!glfwWindowShouldClose(Window->Handle))
     {
         // Check if window should close.

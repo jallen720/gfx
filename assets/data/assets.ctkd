@@ -23,36 +23,14 @@ textures
 }
 shader_modules
 {
-    unlit_color_vert
+    unlit_texture_vert
     {
-        path assets/shaders/shader.vert.spv
+        path assets/shaders/unlit_texture.vert.spv
         stage VK_SHADER_STAGE_VERTEX_BIT
     }
-    unlit_color_frag
+    unlit_texture_frag
     {
-        path assets/shaders/shader.frag.spv
-        stage VK_SHADER_STAGE_FRAGMENT_BIT
-    }
-
-    deferred_vert
-    {
-        path assets/shaders/deferred/deferred.vert.spv
-        stage VK_SHADER_STAGE_VERTEX_BIT
-    }
-    deferred_frag
-    {
-        path assets/shaders/deferred/deferred.frag.spv
-        stage VK_SHADER_STAGE_FRAGMENT_BIT
-    }
-
-    lighting_vert
-    {
-        path assets/shaders/deferred/lighting.vert.spv
-        stage VK_SHADER_STAGE_VERTEX_BIT
-    }
-    lighting_frag
-    {
-        path assets/shaders/deferred/lighting.frag.spv
+        path assets/shaders/unlit_texture.frag.spv
         stage VK_SHADER_STAGE_FRAGMENT_BIT
     }
 }

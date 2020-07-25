@@ -35,22 +35,6 @@ descriptors
         count 1
         texture brick
     }
-
-    # Deferred
-    deferred_albedo_texture
-    {
-        type VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-        shader_stage_flags [ VK_SHADER_STAGE_FRAGMENT_BIT ]
-        count 1
-        texture deferred_albedo
-    }
-    deferred_position_texture
-    {
-        type VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-        shader_stage_flags [ VK_SHADER_STAGE_FRAGMENT_BIT ]
-        count 1
-        texture deferred_position
-    }
 }
 descriptor_sets
 {
@@ -58,37 +42,31 @@ descriptor_sets
     {
         type dynamic
         descriptor_bindings [ { binding 0 descriptor entity } ]
+        color_blend_attachment_states 1
     }
     grass_texture
     {
         type static
         descriptor_bindings [ { binding 0 descriptor grass_texture } ]
+        color_blend_attachment_states 1
     }
     grass_cube_texture
     {
         type static
         descriptor_bindings [ { binding 0 descriptor grass_cube_texture } ]
+        color_blend_attachment_states 1
     }
     dirt_texture
     {
         type static
         descriptor_bindings [ { binding 0 descriptor dirt_texture } ]
+        color_blend_attachment_states 1
     }
     brick_texture
     {
         type static
         descriptor_bindings [ { binding 0 descriptor brick_texture } ]
-    }
-
-    # Deferred
-    deferred_textures
-    {
-        type static
-        descriptor_bindings
-        [
-            { binding 0 descriptor deferred_albedo_texture }
-            { binding 1 descriptor deferred_position_texture }
-        ]
+        color_blend_attachment_states 1
     }
 }
 vertex_layout
@@ -99,41 +77,20 @@ vertex_layout
 }
 graphics_pipelines
 {
-    deferred
+    default
     {
         primitive_topology VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
         depth_testing VK_TRUE
-        render_pass deferred
+        render_pass direct
         shader_modules
         [
-            deferred_vert
-            deferred_frag
+            unlit_texture_vert
+            unlit_texture_frag
         ]
         descriptor_set_layouts
         [
             entity
             grass_texture
-        ]
-        vertex_inputs
-        [
-            { binding 0 location 0 attribute position }
-            { binding 0 location 1 attribute normal }
-            { binding 0 location 2 attribute uv }
-        ]
-    }
-    lighting
-    {
-        primitive_topology VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-        depth_testing VK_TRUE
-        render_pass lighting
-        shader_modules
-        [
-            lighting_vert
-            lighting_frag
-        ]
-        descriptor_set_layouts
-        [
-            deferred_textures
         ]
         vertex_inputs
         [
