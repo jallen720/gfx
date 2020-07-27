@@ -149,4 +149,7 @@ void
 record_direct_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, scene *Scene);
 
 void
+record_stencil_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, scene *Scene);
+
+void
 render(vulkan_instance *VulkanInstance, vulkan_state *VulkanState);

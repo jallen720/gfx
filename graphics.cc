@@ -131,8 +131,8 @@ create_render_passes(vulkan_instance *VulkanInstance, assets *Assets, vulkan_sta
     DepthAttachment.Description.format = DepthImage->Format;
     DepthAttachment.Description.samples = VK_SAMPLE_COUNT_1_BIT;
     DepthAttachment.Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    DepthAttachment.Description.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    DepthAttachment.Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    DepthAttachment.Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    DepthAttachment.Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     DepthAttachment.Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     DepthAttachment.Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     DepthAttachment.Description.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -264,13 +264,13 @@ create_vulkan_instance(window *Window)
 
     // Buffers
     vtk::buffer_info HostBufferInfo = {};
-    HostBufferInfo.Size = 100 * CTK_MEGABYTE;
+    HostBufferInfo.Size = 256 * CTK_MEGABYTE;
     HostBufferInfo.UsageFlags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     HostBufferInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     *HostBuffer = vtk::create_buffer(Device, &HostBufferInfo);
 
     vtk::buffer_info DeviceBufferInfo = {};
-    DeviceBufferInfo.Size = 100 * CTK_MEGABYTE;
+    DeviceBufferInfo.Size = 256 * CTK_MEGABYTE;
     DeviceBufferInfo.UsageFlags = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     DeviceBufferInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     VulkanInstance->DeviceBuffer = vtk::create_buffer(Device, &DeviceBufferInfo);
@@ -367,7 +367,7 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
     DepthImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
     DepthImageInfo.UsageFlags = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     DepthImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    DepthImageInfo.AspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    DepthImageInfo.AspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
     VulkanState->DepthImage = vtk::create_image(Device, &DepthImageInfo);
 
     // Render Passes
@@ -463,18 +463,24 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
         ctk::data *ShaderModuleArray = ctk::at(GraphicsPipelineData, "shader_modules");
         ctk::data *DescriptorSetLayoutArray = ctk::at(GraphicsPipelineData, "descriptor_set_layouts");
         ctk::data *VertexInputArray = ctk::at(GraphicsPipelineData, "vertex_inputs");
-        vtk::graphics_pipeline_info GraphicsPipelineInfo = {};
+        vtk::graphics_pipeline_info GraphicsPipelineInfo = vtk::default_graphics_pipeline_info();
+
+        // Shader Modules
         for(u32 ShaderModuleIndex = 0; ShaderModuleIndex < ShaderModuleArray->Children.Count; ++ShaderModuleIndex)
         {
             ctk::push(&GraphicsPipelineInfo.ShaderModules,
                       ctk::at(&Assets->ShaderModules, ctk::to_cstr(ShaderModuleArray, ShaderModuleIndex)));
         }
+
+        // Descriptor Set Layouts
         for(u32 DescriptorSetLayoutIndex = 0; DescriptorSetLayoutIndex < DescriptorSetLayoutArray->Children.Count;
             ++DescriptorSetLayoutIndex)
         {
             ctk::push(&GraphicsPipelineInfo.DescriptorSetLayouts,
                       ctk::at(DescriptorSets, ctk::to_cstr(DescriptorSetLayoutArray, DescriptorSetLayoutIndex))->Layout);
         }
+
+        // Vertex Inputs
         for(u32 VertexInputIndex = 0; VertexInputIndex < VertexInputArray->Children.Count; ++VertexInputIndex)
         {
             ctk::data *VertexInputData = ctk::at(VertexInputArray, VertexInputIndex);
@@ -486,9 +492,14 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
                       });
         }
         GraphicsPipelineInfo.VertexLayout = VertexLayout;
-        GraphicsPipelineInfo.ViewportExtent = Swapchain->Extent;
-        GraphicsPipelineInfo.PrimitiveTopology = vtk::get_vk_primitive_topology(ctk::to_cstr(GraphicsPipelineData, "primitive_topology"));
-        GraphicsPipelineInfo.DepthTesting = vtk::get_vk_bool_32(ctk::to_cstr(GraphicsPipelineData, "depth_testing"));
+
+        // Misc.
+        ctk::push(&GraphicsPipelineInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
+        ctk::push(&GraphicsPipelineInfo.Scissors, { 0, 0, Swapchain->Extent.width, Swapchain->Extent.height });
+        GraphicsPipelineInfo.InputAssemblyState.topology =
+            vtk::get_vk_primitive_topology(ctk::to_cstr(GraphicsPipelineData, "primitive_topology"));
+        GraphicsPipelineInfo.DepthStencilState.depthTestEnable = vtk::get_vk_bool_32(ctk::to_cstr(GraphicsPipelineData, "depth_testing"));
+        GraphicsPipelineInfo.DepthStencilState.depthWriteEnable = vtk::get_vk_bool_32(ctk::to_cstr(GraphicsPipelineData, "depth_writing"));
         vtk::render_pass *RenderPass = ctk::at(&VulkanState->RenderPasses, ctk::to_cstr(GraphicsPipelineData, "render_pass"));
         ctk::push(&VulkanState->GraphicsPipelines, GraphicsPipelineData->Key.Data,
                   vtk::create_graphics_pipeline(Device->Logical, RenderPass, &GraphicsPipelineInfo));
@@ -591,6 +602,92 @@ record_direct_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanS
             // Vertex/Index Buffers
             vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh->VertexRegion.Buffer->Handle, &Mesh->VertexRegion.Offset);
             vkCmdBindIndexBuffer(CommandBuffer, Mesh->IndexRegion.Buffer->Handle, Mesh->IndexRegion.Offset, VK_INDEX_TYPE_UINT32);
+
+            // Draw
+            vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
+        }
+
+        // End
+        vkCmdEndRenderPass(CommandBuffer);
+        vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
+    }
+}
+
+void
+record_stencil_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, scene *Scene)
+{
+    vtk::device *Device = &VulkanInstance->Device;
+    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+    vtk::frame_state *FrameState = &VulkanInstance->FrameState;
+    vtk::render_pass *DirectRenderPass = ctk::at(&VulkanState->RenderPasses, "direct");
+    vtk::graphics_pipeline *StencilRenderGP = ctk::at(&VulkanState->GraphicsPipelines, "stencil_render");
+    vtk::graphics_pipeline *OutlineGP = ctk::at(&VulkanState->GraphicsPipelines, "outline");
+
+    VkRect2D RenderArea = {};
+    RenderArea.offset.x = 0;
+    RenderArea.offset.y = 0;
+    RenderArea.extent = Swapchain->Extent;
+
+    VkCommandBufferBeginInfo CommandBufferBeginInfo = {};
+    CommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    CommandBufferBeginInfo.flags = 0;
+    CommandBufferBeginInfo.pInheritanceInfo = NULL;
+
+    for(u32 SwapchainImageIndex = 0; SwapchainImageIndex < Swapchain->Images.Count; ++SwapchainImageIndex)
+    {
+        VkCommandBuffer CommandBuffer = *ctk::at(&DirectRenderPass->CommandBuffers, SwapchainImageIndex);
+        vtk::validate_vk_result(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
+                                "vkBeginCommandBuffer", "failed to begin recording command buffer");
+        VkRenderPassBeginInfo RenderPassBeginInfo = {};
+        RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        RenderPassBeginInfo.renderPass = DirectRenderPass->Handle;
+        RenderPassBeginInfo.framebuffer = *ctk::at(&DirectRenderPass->Framebuffers, SwapchainImageIndex);
+        RenderPassBeginInfo.renderArea = RenderArea;
+        RenderPassBeginInfo.clearValueCount = DirectRenderPass->ClearValues.Count;
+        RenderPassBeginInfo.pClearValues = DirectRenderPass->ClearValues.Data;
+
+        // Begin
+        vkCmdBeginRenderPass(CommandBuffer, &RenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        ////////////////////////////////////////////////////////////
+        /// Render Commands
+        ////////////////////////////////////////////////////////////
+        for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex)
+        {
+            entity *Entity = Scene->Entities.Values + EntityIndex;
+            mesh *Mesh = Entity->Mesh;
+
+            // Vertex/Index Buffers
+            vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh->VertexRegion.Buffer->Handle, &Mesh->VertexRegion.Offset);
+            vkCmdBindIndexBuffer(CommandBuffer, Mesh->IndexRegion.Buffer->Handle, Mesh->IndexRegion.Offset, VK_INDEX_TYPE_UINT32);
+
+            ////////////////////////////////////////////////////////////
+            /// Stencil Render
+            ////////////////////////////////////////////////////////////
+
+            // Graphics Pipeline
+            vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, StencilRenderGP->Handle);
+
+            // Descriptor Sets
+            vtk::bind_descriptor_sets(CommandBuffer, StencilRenderGP->Layout,
+                                      Entity->DescriptorSets.Data, Entity->DescriptorSets.Count,
+                                      SwapchainImageIndex, EntityIndex);
+
+            // Draw
+            vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
+
+            ////////////////////////////////////////////////////////////
+            /// Outline
+            ////////////////////////////////////////////////////////////
+
+            // Graphics Pipeline
+            vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, OutlineGP->Handle);
+
+            // Descriptor Sets
+            vtk::descriptor_set* DescriptorSet = ctk::at(&VulkanState->DescriptorSets, "entity");
+            vtk::bind_descriptor_sets(CommandBuffer, OutlineGP->Layout,
+                                      &DescriptorSet, 1,
+                                      SwapchainImageIndex, EntityIndex);
 
             // Draw
             vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);

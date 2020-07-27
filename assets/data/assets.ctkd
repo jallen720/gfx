@@ -33,6 +33,28 @@ shader_modules
         path assets/shaders/unlit_texture.frag.spv
         stage VK_SHADER_STAGE_FRAGMENT_BIT
     }
+
+    # Stencil Testing
+    stencil_render_vert
+    {
+        path assets/shaders/stencil/stencil_render.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    stencil_render_frag
+    {
+        path assets/shaders/stencil/stencil_render.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
+    outline_vert
+    {
+        path assets/shaders/stencil/outline.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    outline_frag
+    {
+        path assets/shaders/stencil/outline.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
 }
 models
 {
