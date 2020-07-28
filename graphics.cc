@@ -119,14 +119,36 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
 }
 
 static void
-create_render_passes(vulkan_instance *VulkanInstance, assets *Assets, vulkan_state *VulkanState)
+create_default_vulkan_state(vulkan_instance *VulkanInstance, vulkan_state *VulkanState)
 {
-    static const VkClearValue COLOR_ATTACHMENT_CLEAR_VALUE = { 0.04f, 0.04f, 0.04f, 1.0f };
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
     vtk::image *DepthImage = &VulkanState->DepthImage;
+    auto *UniformBuffers = &VulkanState->UniformBuffers;
 
-    // Depth Attachment
+    // Uniform Buffers
+    ctk::push(UniformBuffers, "entity", vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, 64, sizeof(entity_ubo),
+                                                                   Swapchain->Images.Count));
+    ctk::push(UniformBuffers, "light", vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, 64, sizeof(light_ubo),
+                                                                  Swapchain->Images.Count));
+
+    // Depth Image
+    vtk::image_info DepthImageInfo = {};
+    DepthImageInfo.Width = Swapchain->Extent.width;
+    DepthImageInfo.Height = Swapchain->Extent.height;
+    DepthImageInfo.Format = vtk::find_depth_image_format(Device->Physical);
+    DepthImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
+    DepthImageInfo.UsageFlags = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    DepthImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    DepthImageInfo.AspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+    *DepthImage = vtk::create_image(Device, &DepthImageInfo);
+
+    ////////////////////////////////////////////////////////////
+    /// Default Render Pass
+    ////////////////////////////////////////////////////////////
+    vtk::render_pass_info DefaultRenderPassInfo = {};
+
+    // Attachments
     vtk::attachment DepthAttachment = {};
     DepthAttachment.Description.format = DepthImage->Format;
     DepthAttachment.Description.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -138,52 +160,44 @@ create_render_passes(vulkan_instance *VulkanInstance, assets *Assets, vulkan_sta
     DepthAttachment.Description.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     DepthAttachment.ClearValue = { 1.0f, 0 };
 
-    ////////////////////////////////////////////////////////////
-    /// Direct Render Pass
-    ////////////////////////////////////////////////////////////
-    vtk::render_pass *DirectRenderPass = ctk::push(&VulkanState->RenderPasses, "direct");
+    u32 DefaultColorAttachmentIndex = DefaultRenderPassInfo.Attachments.Count;
+    vtk::attachment *DefaultColorAttachment = ctk::push(&DefaultRenderPassInfo.Attachments);
+    DefaultColorAttachment->Description.format = Swapchain->ImageFormat;
+    DefaultColorAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
+    DefaultColorAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    DefaultColorAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    DefaultColorAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    DefaultColorAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    DefaultColorAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    DefaultColorAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    DefaultColorAttachment->ClearValue = { 0.04f, 0.04f, 0.04f, 1.0f };
 
-    // Render Pass Info
-    vtk::render_pass_info DirectRenderPassInfo = {};
-
-    // Attachments
-    u32 DirectColorAttachmentIndex = DirectRenderPassInfo.Attachments.Count;
-    vtk::attachment *DirectColorAttachment = ctk::push(&DirectRenderPassInfo.Attachments);
-    DirectColorAttachment->Description.format = Swapchain->ImageFormat;
-    DirectColorAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
-    DirectColorAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    DirectColorAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    DirectColorAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    DirectColorAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    DirectColorAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    DirectColorAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    DirectColorAttachment->ClearValue = COLOR_ATTACHMENT_CLEAR_VALUE;
-
-    u32 DirectDepthAttachmentIndex = DirectRenderPassInfo.Attachments.Count;
-    ctk::push(&DirectRenderPassInfo.Attachments, DepthAttachment);
+    u32 DefaultDepthAttachmentIndex = DefaultRenderPassInfo.Attachments.Count;
+    ctk::push(&DefaultRenderPassInfo.Attachments, DepthAttachment);
 
     // Subpasses
-    vtk::subpass *DirectSubpass = ctk::push(&DirectRenderPassInfo.Subpasses);
+    vtk::subpass *DefaultSubpass = ctk::push(&DefaultRenderPassInfo.Subpasses);
 
-    VkAttachmentReference *DirectColorAttachmentReference = ctk::push(&DirectSubpass->ColorAttachmentReferences);
-    DirectColorAttachmentReference->attachment = DirectColorAttachmentIndex;
-    DirectColorAttachmentReference->layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    VkAttachmentReference *DefaultColorAttachmentReference = ctk::push(&DefaultSubpass->ColorAttachmentReferences);
+    DefaultColorAttachmentReference->attachment = DefaultColorAttachmentIndex;
+    DefaultColorAttachmentReference->layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    DirectSubpass->DepthAttachmentReference.Set = true;
-    DirectSubpass->DepthAttachmentReference.Value.attachment = DirectDepthAttachmentIndex;
-    DirectSubpass->DepthAttachmentReference.Value.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    DefaultSubpass->DepthAttachmentReference.Set = true;
+    DefaultSubpass->DepthAttachmentReference.Value.attachment = DefaultDepthAttachmentIndex;
+    DefaultSubpass->DepthAttachmentReference.Value.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
     // Framebuffer Infos
     for(u32 FramebufferIndex = 0; FramebufferIndex < Swapchain->Images.Count; ++FramebufferIndex)
     {
-        vtk::framebuffer_info *FramebufferInfo = ctk::push(&DirectRenderPassInfo.FramebufferInfos);
+        vtk::framebuffer_info *FramebufferInfo = ctk::push(&DefaultRenderPassInfo.FramebufferInfos);
         ctk::push(&FramebufferInfo->Attachments, Swapchain->Images[FramebufferIndex].View);
         ctk::push(&FramebufferInfo->Attachments, DepthImage->View);
         FramebufferInfo->Extent = Swapchain->Extent;
         FramebufferInfo->Layers = 1;
     }
 
-    *DirectRenderPass = vtk::create_render_pass(Device->Logical, VulkanInstance->GraphicsCommandPool, &DirectRenderPassInfo);
+    ctk::push(&VulkanState->RenderPasses, "default", vtk::create_render_pass(Device->Logical, VulkanInstance->GraphicsCommandPool,
+                                                                             &DefaultRenderPassInfo));
 }
 
 ////////////////////////////////////////////////////////////
@@ -276,7 +290,7 @@ create_vulkan_instance(window *Window)
     VulkanInstance->DeviceBuffer = vtk::create_buffer(Device, &DeviceBufferInfo);
 
     // Regions
-    VulkanInstance->StagingRegion = vtk::allocate_region(HostBuffer, 50 * CTK_MEGABYTE);
+    VulkanInstance->StagingRegion = vtk::allocate_region(HostBuffer, 64 * CTK_MEGABYTE);
 
     return VulkanInstance;
 }
@@ -338,40 +352,16 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
 
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
-    vtk::frame_state *FrameState = &VulkanInstance->FrameState;
 
     VkDescriptorPool *DescriptorPool = &VulkanState->DescriptorPool;
     vtk::vertex_layout *VertexLayout = &VulkanState->VertexLayout;
-    auto *UniformBuffers = &VulkanState->UniformBuffers;
     auto *DescriptorSets = &VulkanState->DescriptorSets;
     auto *VertexAttributeIndexes = &VulkanState->VertexAttributeIndexes;
 
+    create_default_vulkan_state(VulkanInstance, VulkanState);
+
+    // Load vulkan state from data file.
     ctk::data VulkanStateData = ctk::load_data("assets/data/vulkan_state.ctkd");
-
-    ////////////////////////////////////////////////////////////
-    /// Predefined State
-    ////////////////////////////////////////////////////////////
-    ctk::todo("using frame count instead of swapchain image count");
-
-    // Uniform Buffers
-    ctk::push(UniformBuffers, "entity",
-              vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, 64, sizeof(entity_ubo), FrameState->Frames.Count));
-    ctk::push(UniformBuffers, "light",
-              vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, 64, sizeof(light_ubo), FrameState->Frames.Count));
-
-    // Depth Image
-    vtk::image_info DepthImageInfo = {};
-    DepthImageInfo.Width = Swapchain->Extent.width;
-    DepthImageInfo.Height = Swapchain->Extent.height;
-    DepthImageInfo.Format = vtk::find_depth_image_format(Device->Physical);
-    DepthImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
-    DepthImageInfo.UsageFlags = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    DepthImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    DepthImageInfo.AspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-    VulkanState->DepthImage = vtk::create_image(Device, &DepthImageInfo);
-
-    // Render Passes
-    create_render_passes(VulkanInstance, Assets, VulkanState);
 
     ////////////////////////////////////////////////////////////
     /// Descriptor Sets
@@ -398,7 +388,7 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
         if(Type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
            Type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC)
         {
-            DescriptorInfo->UniformBuffer = ctk::at(UniformBuffers, ctk::to_cstr(DescriptorData, "uniform_buffer"));
+            DescriptorInfo->UniformBuffer = ctk::at(&VulkanState->UniformBuffers, ctk::to_cstr(DescriptorData, "uniform_buffer"));
         }
         else if(Type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
         {
@@ -418,8 +408,7 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
         ctk::data *DescriptorSetData = ctk::at(DescriptorSetMap, DescriptorSetIndex);
         vtk::descriptor_set_info *DescriptorSetInfo = ctk::push(&DescriptorSetInfos, DescriptorSetData->Key.Data);
         b32 IsDynamic = ctk::equal(ctk::to_cstr(DescriptorSetData, "type"), "dynamic");
-        ctk::todo("using frame count instead of swapchain image count");
-        DescriptorSetInfo->InstanceCount = IsDynamic ? FrameState->Frames.Count : 1;
+        DescriptorSetInfo->InstanceCount = IsDynamic ? Swapchain->Images.Count : 1;
         ctk::data *DescriptorBindingArray = ctk::at(DescriptorSetData, "descriptor_bindings");
         for(u32 DescriptorBindingIndex = 0; DescriptorBindingIndex < DescriptorBindingArray->Children.Count; ++DescriptorBindingIndex)
         {
@@ -514,6 +503,10 @@ update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene)
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
     transform *CameraTransform = &Scene->Camera.Transform;
 
+    ////////////////////////////////////////////////////////////
+    /// Entity UBOs
+    ////////////////////////////////////////////////////////////
+
     // View Matrix
     glm::vec3 CameraPosition = { CameraTransform->Position.X, CameraTransform->Position.Y, CameraTransform->Position.Z };
     glm::mat4 CameraMatrix(1.0f);
@@ -550,12 +543,12 @@ update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene)
 }
 
 void
-record_direct_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, scene *Scene)
+record_default_command_buffers(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, scene *Scene)
 {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
     vtk::frame_state *FrameState = &VulkanInstance->FrameState;
-    vtk::render_pass *DirectRenderPass = ctk::at(&VulkanState->RenderPasses, "direct");
+    vtk::render_pass *DefaultRenderPass = ctk::at(&VulkanState->RenderPasses, "default");
 
     VkRect2D RenderArea = {};
     RenderArea.offset.x = 0;
@@ -569,16 +562,16 @@ record_direct_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanS
 
     for(u32 SwapchainImageIndex = 0; SwapchainImageIndex < Swapchain->Images.Count; ++SwapchainImageIndex)
     {
-        VkCommandBuffer CommandBuffer = *ctk::at(&DirectRenderPass->CommandBuffers, SwapchainImageIndex);
+        VkCommandBuffer CommandBuffer = *ctk::at(&DefaultRenderPass->CommandBuffers, SwapchainImageIndex);
         vtk::validate_vk_result(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
                                 "vkBeginCommandBuffer", "failed to begin recording command buffer");
         VkRenderPassBeginInfo RenderPassBeginInfo = {};
         RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        RenderPassBeginInfo.renderPass = DirectRenderPass->Handle;
-        RenderPassBeginInfo.framebuffer = *ctk::at(&DirectRenderPass->Framebuffers, SwapchainImageIndex);
+        RenderPassBeginInfo.renderPass = DefaultRenderPass->Handle;
+        RenderPassBeginInfo.framebuffer = *ctk::at(&DefaultRenderPass->Framebuffers, SwapchainImageIndex);
         RenderPassBeginInfo.renderArea = RenderArea;
-        RenderPassBeginInfo.clearValueCount = DirectRenderPass->ClearValues.Count;
-        RenderPassBeginInfo.pClearValues = DirectRenderPass->ClearValues.Data;
+        RenderPassBeginInfo.clearValueCount = DefaultRenderPass->ClearValues.Count;
+        RenderPassBeginInfo.pClearValues = DefaultRenderPass->ClearValues.Data;
 
         // Begin
         vkCmdBeginRenderPass(CommandBuffer, &RenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
@@ -614,93 +607,7 @@ record_direct_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanS
 }
 
 void
-record_stencil_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, scene *Scene)
-{
-    vtk::device *Device = &VulkanInstance->Device;
-    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
-    vtk::frame_state *FrameState = &VulkanInstance->FrameState;
-    vtk::render_pass *DirectRenderPass = ctk::at(&VulkanState->RenderPasses, "direct");
-    vtk::graphics_pipeline *StencilRenderGP = ctk::at(&VulkanState->GraphicsPipelines, "stencil_render");
-    vtk::graphics_pipeline *OutlineGP = ctk::at(&VulkanState->GraphicsPipelines, "outline");
-
-    VkRect2D RenderArea = {};
-    RenderArea.offset.x = 0;
-    RenderArea.offset.y = 0;
-    RenderArea.extent = Swapchain->Extent;
-
-    VkCommandBufferBeginInfo CommandBufferBeginInfo = {};
-    CommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    CommandBufferBeginInfo.flags = 0;
-    CommandBufferBeginInfo.pInheritanceInfo = NULL;
-
-    for(u32 SwapchainImageIndex = 0; SwapchainImageIndex < Swapchain->Images.Count; ++SwapchainImageIndex)
-    {
-        VkCommandBuffer CommandBuffer = *ctk::at(&DirectRenderPass->CommandBuffers, SwapchainImageIndex);
-        vtk::validate_vk_result(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
-                                "vkBeginCommandBuffer", "failed to begin recording command buffer");
-        VkRenderPassBeginInfo RenderPassBeginInfo = {};
-        RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        RenderPassBeginInfo.renderPass = DirectRenderPass->Handle;
-        RenderPassBeginInfo.framebuffer = *ctk::at(&DirectRenderPass->Framebuffers, SwapchainImageIndex);
-        RenderPassBeginInfo.renderArea = RenderArea;
-        RenderPassBeginInfo.clearValueCount = DirectRenderPass->ClearValues.Count;
-        RenderPassBeginInfo.pClearValues = DirectRenderPass->ClearValues.Data;
-
-        // Begin
-        vkCmdBeginRenderPass(CommandBuffer, &RenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        ////////////////////////////////////////////////////////////
-        /// Render Commands
-        ////////////////////////////////////////////////////////////
-        for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex)
-        {
-            entity *Entity = Scene->Entities.Values + EntityIndex;
-            mesh *Mesh = Entity->Mesh;
-
-            // Vertex/Index Buffers
-            vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh->VertexRegion.Buffer->Handle, &Mesh->VertexRegion.Offset);
-            vkCmdBindIndexBuffer(CommandBuffer, Mesh->IndexRegion.Buffer->Handle, Mesh->IndexRegion.Offset, VK_INDEX_TYPE_UINT32);
-
-            ////////////////////////////////////////////////////////////
-            /// Stencil Render
-            ////////////////////////////////////////////////////////////
-
-            // Graphics Pipeline
-            vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, StencilRenderGP->Handle);
-
-            // Descriptor Sets
-            vtk::bind_descriptor_sets(CommandBuffer, StencilRenderGP->Layout,
-                                      Entity->DescriptorSets.Data, Entity->DescriptorSets.Count,
-                                      SwapchainImageIndex, EntityIndex);
-
-            // Draw
-            vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
-
-            ////////////////////////////////////////////////////////////
-            /// Outline
-            ////////////////////////////////////////////////////////////
-
-            // Graphics Pipeline
-            vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, OutlineGP->Handle);
-
-            // Descriptor Sets
-            vtk::descriptor_set* DescriptorSet = ctk::at(&VulkanState->DescriptorSets, "entity");
-            vtk::bind_descriptor_sets(CommandBuffer, OutlineGP->Layout,
-                                      &DescriptorSet, 1,
-                                      SwapchainImageIndex, EntityIndex);
-
-            // Draw
-            vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
-        }
-
-        // End
-        vkCmdEndRenderPass(CommandBuffer);
-        vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
-    }
-}
-
-void
-render(vulkan_instance *VulkanInstance, vulkan_state *VulkanState)
+render_default_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState)
 {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
@@ -713,11 +620,9 @@ render(vulkan_instance *VulkanInstance, vulkan_state *VulkanState)
 
     // Aquire next swapchain image index, using a semaphore to signal when image is available for rendering.
     u32 SwapchainImageIndex = VTK_UNSET_INDEX;
-    {
-        VkResult Result = vkAcquireNextImageKHR(Device->Logical, Swapchain->Handle, UINT64_MAX, CurrentFrame->ImageAquiredSemaphore,
-                                                VK_NULL_HANDLE, &SwapchainImageIndex);
-        vtk::validate_vk_result(Result, "vkAcquireNextImageKHR", "failed to aquire next swapchain image");
-    }
+    vtk::validate_vk_result(vkAcquireNextImageKHR(Device->Logical, Swapchain->Handle, UINT64_MAX, CurrentFrame->ImageAquiredSemaphore,
+                                                  VK_NULL_HANDLE, &SwapchainImageIndex),
+                            "vkAcquireNextImageKHR", "failed to aquire next swapchain image");
 
     // Wait on swapchain images previously associated frame fence before rendering.
     VkFence *PreviousFrameInFlightFence = FrameState->PreviousFrameInFlightFences + SwapchainImageIndex;
@@ -731,23 +636,20 @@ render(vulkan_instance *VulkanInstance, vulkan_state *VulkanState)
     ////////////////////////////////////////////////////////////
     /// Command Buffers Submission
     ////////////////////////////////////////////////////////////
-    VkSemaphore DirectWaitSemaphores[] = { CurrentFrame->ImageAquiredSemaphore };
-    VkPipelineStageFlags DirectWaitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    VkSemaphore DirectSignalSemaphores[] = { CurrentFrame->RenderFinishedSemaphore };
-    VkCommandBuffer DirectCommandBuffers[] =
-    {
-        *ctk::at(&ctk::at(&VulkanState->RenderPasses, "direct")->CommandBuffers, SwapchainImageIndex),
-    };
+    VkSemaphore WaitSemaphores[] = { CurrentFrame->ImageAquiredSemaphore };
+    VkPipelineStageFlags WaitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+    VkSemaphore SignalSemaphores[] = { CurrentFrame->RenderFinishedSemaphore };
+    VkCommandBuffer CommandBuffers[] = { ctk::at(&VulkanState->RenderPasses, "default")->CommandBuffers[SwapchainImageIndex] };
 
     VkSubmitInfo SubmitInfos[1] = {};
     SubmitInfos[0].sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    SubmitInfos[0].waitSemaphoreCount = CTK_ARRAY_COUNT(DirectWaitSemaphores);
-    SubmitInfos[0].pWaitSemaphores = DirectWaitSemaphores;
-    SubmitInfos[0].pWaitDstStageMask = DirectWaitStages;
-    SubmitInfos[0].commandBufferCount = CTK_ARRAY_COUNT(DirectCommandBuffers);
-    SubmitInfos[0].pCommandBuffers = DirectCommandBuffers;
-    SubmitInfos[0].signalSemaphoreCount = CTK_ARRAY_COUNT(DirectSignalSemaphores);
-    SubmitInfos[0].pSignalSemaphores = DirectSignalSemaphores;
+    SubmitInfos[0].waitSemaphoreCount = CTK_ARRAY_COUNT(WaitSemaphores);
+    SubmitInfos[0].pWaitSemaphores = WaitSemaphores;
+    SubmitInfos[0].pWaitDstStageMask = WaitStages;
+    SubmitInfos[0].commandBufferCount = CTK_ARRAY_COUNT(CommandBuffers);
+    SubmitInfos[0].pCommandBuffers = CommandBuffers;
+    SubmitInfos[0].signalSemaphoreCount = CTK_ARRAY_COUNT(SignalSemaphores);
+    SubmitInfos[0].pSignalSemaphores = SignalSemaphores;
 
     vtk::validate_vk_result(vkQueueSubmit(Device->GraphicsQueue, CTK_ARRAY_COUNT(SubmitInfos), SubmitInfos, CurrentFrame->InFlightFence),
                             "vkQueueSubmit", "failed to submit command buffer to graphics queue");

@@ -157,6 +157,92 @@ camera_controls(transform *CameraTransform, input_state *InputState)
     local_translate(CameraTransform, Translation);
 }
 
+static void
+record_stencil_command_buffers(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, scene *Scene)
+{
+    vtk::device *Device = &VulkanInstance->Device;
+    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+    vtk::frame_state *FrameState = &VulkanInstance->FrameState;
+    vtk::render_pass *DefaultRenderPass = ctk::at(&VulkanState->RenderPasses, "default");
+    vtk::graphics_pipeline *StencilRenderGP = ctk::at(&VulkanState->GraphicsPipelines, "stencil_render");
+    vtk::graphics_pipeline *OutlineGP = ctk::at(&VulkanState->GraphicsPipelines, "outline");
+
+    VkRect2D RenderArea = {};
+    RenderArea.offset.x = 0;
+    RenderArea.offset.y = 0;
+    RenderArea.extent = Swapchain->Extent;
+
+    VkCommandBufferBeginInfo CommandBufferBeginInfo = {};
+    CommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    CommandBufferBeginInfo.flags = 0;
+    CommandBufferBeginInfo.pInheritanceInfo = NULL;
+
+    for(u32 SwapchainImageIndex = 0; SwapchainImageIndex < Swapchain->Images.Count; ++SwapchainImageIndex)
+    {
+        VkCommandBuffer CommandBuffer = *ctk::at(&DefaultRenderPass->CommandBuffers, SwapchainImageIndex);
+        vtk::validate_vk_result(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
+                                "vkBeginCommandBuffer", "failed to begin recording command buffer");
+        VkRenderPassBeginInfo RenderPassBeginInfo = {};
+        RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        RenderPassBeginInfo.renderPass = DefaultRenderPass->Handle;
+        RenderPassBeginInfo.framebuffer = *ctk::at(&DefaultRenderPass->Framebuffers, SwapchainImageIndex);
+        RenderPassBeginInfo.renderArea = RenderArea;
+        RenderPassBeginInfo.clearValueCount = DefaultRenderPass->ClearValues.Count;
+        RenderPassBeginInfo.pClearValues = DefaultRenderPass->ClearValues.Data;
+
+        // Begin
+        vkCmdBeginRenderPass(CommandBuffer, &RenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        ////////////////////////////////////////////////////////////
+        /// Render Commands
+        ////////////////////////////////////////////////////////////
+        for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex)
+        {
+            entity *Entity = Scene->Entities.Values + EntityIndex;
+            mesh *Mesh = Entity->Mesh;
+
+            // Vertex/Index Buffers
+            vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh->VertexRegion.Buffer->Handle, &Mesh->VertexRegion.Offset);
+            vkCmdBindIndexBuffer(CommandBuffer, Mesh->IndexRegion.Buffer->Handle, Mesh->IndexRegion.Offset, VK_INDEX_TYPE_UINT32);
+
+            ////////////////////////////////////////////////////////////
+            /// Stencil Render
+            ////////////////////////////////////////////////////////////
+
+            // Graphics Pipeline
+            vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, StencilRenderGP->Handle);
+
+            // Descriptor Sets
+            vtk::bind_descriptor_sets(CommandBuffer, StencilRenderGP->Layout,
+                                      Entity->DescriptorSets.Data, Entity->DescriptorSets.Count,
+                                      SwapchainImageIndex, EntityIndex);
+
+            // Draw
+            vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
+
+            ////////////////////////////////////////////////////////////
+            /// Outline
+            ////////////////////////////////////////////////////////////
+
+            // Graphics Pipeline
+            vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, OutlineGP->Handle);
+
+            // Descriptor Sets
+            vtk::descriptor_set* DescriptorSet = ctk::at(&VulkanState->DescriptorSets, "entity");
+            vtk::bind_descriptor_sets(CommandBuffer, OutlineGP->Layout,
+                                      &DescriptorSet, 1,
+                                      SwapchainImageIndex, EntityIndex);
+
+            // Draw
+            vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
+        }
+
+        // End
+        vkCmdEndRenderPass(CommandBuffer);
+        vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
+    }
+}
+
 ////////////////////////////////////////////////////////////
 /// Main
 ////////////////////////////////////////////////////////////
@@ -174,6 +260,7 @@ main()
     /// Example
     ////////////////////////////////////////////////////////////
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+    vtk::render_pass *DefaultRP = ctk::at(&VulkanState->RenderPasses, "default");
 
     // Stencil Render GP
     vtk::graphics_pipeline_info StencilRenderGPInfo = vtk::default_graphics_pipeline_info();
@@ -186,8 +273,6 @@ main()
     StencilRenderGPInfo.VertexLayout = &VulkanState->VertexLayout;
     ctk::push(&StencilRenderGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
     ctk::push(&StencilRenderGPInfo.Scissors, { 0, 0, Swapchain->Extent.width, Swapchain->Extent.height });
-
-    StencilRenderGPInfo.RasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
 
     StencilRenderGPInfo.DepthStencilState.stencilTestEnable = VK_TRUE;
     StencilRenderGPInfo.DepthStencilState.back.compareOp = VK_COMPARE_OP_ALWAYS;
@@ -203,8 +288,8 @@ main()
     StencilRenderGPInfo.DepthStencilState.depthWriteEnable = VK_TRUE;
     StencilRenderGPInfo.DepthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
-    ctk::push(&VulkanState->GraphicsPipelines, "stencil_render",
-              vtk::create_graphics_pipeline(VulkanInstance->Device.Logical, ctk::at(&VulkanState->RenderPasses, "direct"), &StencilRenderGPInfo));
+    ctk::push(&VulkanState->GraphicsPipelines, "stencil_render", vtk::create_graphics_pipeline(VulkanInstance->Device.Logical, DefaultRP,
+                                                                                               &StencilRenderGPInfo));
 
     // Outline GP
     vtk::graphics_pipeline_info OutlineGPInfo = vtk::default_graphics_pipeline_info();
@@ -233,11 +318,11 @@ main()
     OutlineGPInfo.DepthStencilState.depthWriteEnable = VK_TRUE;
     OutlineGPInfo.DepthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
-    ctk::push(&VulkanState->GraphicsPipelines, "outline",
-              vtk::create_graphics_pipeline(VulkanInstance->Device.Logical, ctk::at(&VulkanState->RenderPasses, "direct"), &OutlineGPInfo));
+    ctk::push(&VulkanState->GraphicsPipelines, "outline", vtk::create_graphics_pipeline(VulkanInstance->Device.Logical, DefaultRP,
+                                                                                        &OutlineGPInfo));
 
-    // record_direct_render_pass(VulkanInstance, VulkanState, Scene);
-    record_stencil_render_pass(VulkanInstance, VulkanState, Scene);
+    record_default_command_buffers(VulkanInstance, VulkanState, Scene);
+    // record_stencil_command_buffers(VulkanInstance, VulkanState, Scene);
     while(!glfwWindowShouldClose(Window->Handle))
     {
         // Check if window should close.
@@ -251,7 +336,7 @@ main()
         update_input_state(&InputState, Window->Handle);
         camera_controls(&Scene->Camera.Transform, &InputState);
         update_uniform_data(VulkanInstance, Scene);
-        render(VulkanInstance, VulkanState);
+        render_default_render_pass(VulkanInstance, VulkanState);
         Sleep(1);
     }
 }

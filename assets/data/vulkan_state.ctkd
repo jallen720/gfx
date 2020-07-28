@@ -82,7 +82,7 @@ graphics_pipelines
         primitive_topology VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
         depth_testing VK_TRUE
         depth_writing VK_TRUE
-        render_pass direct
+        render_pass default
         shader_modules
         [
             unlit_texture_vert
