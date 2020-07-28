@@ -187,7 +187,7 @@ main()
     ctk::push(&StencilRenderGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
     ctk::push(&StencilRenderGPInfo.Scissors, { 0, 0, Swapchain->Extent.width, Swapchain->Extent.height });
 
-    StencilRenderGPInfo.RasterizationState.cullMode = VK_CULL_MODE_NONE;
+    StencilRenderGPInfo.RasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
 
     StencilRenderGPInfo.DepthStencilState.stencilTestEnable = VK_TRUE;
     StencilRenderGPInfo.DepthStencilState.back.compareOp = VK_COMPARE_OP_ALWAYS;

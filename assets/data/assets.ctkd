@@ -59,6 +59,7 @@ shader_modules
 models
 {
     cube { path assets/models/cube.obj }
+    true_cube { path assets/models/true_cube.obj }
     quad { path assets/models/quad.obj }
     sibenik { path assets/models/sibenik/sibenik.obj }
     fullscreen_plane { path assets/models/fullscreen_plane.obj }

@@ -4,7 +4,7 @@
 layout(set = 0, binding = 0, std140) uniform entity
 {
     mat4 ModelMatrix;
-    mat4 MVPMatrix;
+    mat4 ModelViewProjectionMatrix;
 }
 Entity;
 
@@ -14,6 +14,6 @@ layout(location = 1) in vec3 InNormal;
 void
 main()
 {
-    vec3 ScaledPosition = InPosition + 0.2 * InNormal;
-    gl_Position = Entity.MVPMatrix * vec4(ScaledPosition, 1);
+    vec3 ScaledPosition = InPosition + InNormal * 0.2;
+    gl_Position = Entity.ModelViewProjectionMatrix * vec4(ScaledPosition, 1);
 }

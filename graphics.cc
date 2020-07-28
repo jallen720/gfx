@@ -22,10 +22,10 @@ key_callback(GLFWwindow *Window, s32 Key, s32 Scancode, s32 Action, s32 Mods)
 }
 
 static void
-mouse_button_callback(GLFWwindow *Window, s32 button, s32 Action, s32 Mods)
+mouse_button_callback(GLFWwindow *Window, s32 Button, s32 Action, s32 Mods)
 {
     auto InputState = (input_state *)glfwGetWindowUserPointer(Window);
-    InputState->MouseButtonDown[button] = Action == GLFW_PRESS || Action == GLFW_REPEAT;
+    InputState->MouseButtonDown[Button] = Action == GLFW_PRESS || Action == GLFW_REPEAT;
 }
 
 static mesh
@@ -540,7 +540,7 @@ update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene)
         ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
         ModelMatrix = glm::scale(ModelMatrix, { EntityTransform->Scale.X, EntityTransform->Scale.Y, EntityTransform->Scale.Z });
         Scene->EntityUBOs[EntityIndex].ModelMatrix = ModelMatrix;
-        Scene->EntityUBOs[EntityIndex].MVPMatrix = ProjectionMatrix * ViewMatrix * ModelMatrix;
+        Scene->EntityUBOs[EntityIndex].ModelViewProjectionMatrix = ProjectionMatrix * ViewMatrix * ModelMatrix;
     }
 
     // Write all entity ubos to current frame's entity uniform buffer region.

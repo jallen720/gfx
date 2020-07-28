@@ -26,36 +26,36 @@ entities
         graphics_pipeline default
         mesh sibenik
     }
-    cube
-    {
-        transform
-        {
-            position [ 0 0 0 ]
-            rotation [ 0 0 0 ]
-            scale [ 1 1 1 ]
-        }
-        descriptor_sets
-        [
-            entity
-            grass_cube_texture
-        ]
-        graphics_pipeline default
-        mesh cube
-    }
-    quad
-    {
-        transform
-        {
-            position [ 0 0 2 ]
-            rotation [ 0 0 0 ]
-            scale [ 16 16 16 ]
-        }
-        descriptor_sets
-        [
-            entity
-            grass_texture
-        ]
-        graphics_pipeline default
-        mesh quad
-    }
+    # cube
+    # {
+        # transform
+        # {
+            # position [ 0 0 0 ]
+            # rotation [ 0 0 0 ]
+            # scale [ 1 1 1 ]
+        # }
+        # descriptor_sets
+        # [
+            # entity
+            # grass_cube_texture
+        # ]
+        # graphics_pipeline default
+        # mesh cube
+    # }
+    # quad
+    # {
+    #     transform
+    #     {
+    #         position [ 0 0 2 ]
+    #         rotation [ 0 0 0 ]
+    #         scale [ 16 16 16 ]
+    #     }
+    #     descriptor_sets
+    #     [
+    #         entity
+    #         grass_texture
+    #     ]
+    #     graphics_pipeline default
+    #     mesh quad
+    # }
 }

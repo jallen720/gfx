@@ -85,7 +85,7 @@ struct vulkan_state
 struct entity_ubo
 {
     alignas(16) glm::mat4 ModelMatrix;
-    alignas(16) glm::mat4 MVPMatrix;
+    alignas(16) glm::mat4 ModelViewProjectionMatrix;
 };
 
 struct light_ubo
