@@ -9,12 +9,11 @@ layout(set = 0, binding = 0, std140) uniform entity
 Entity;
 
 layout(location = 0) in vec3 InPosition;
-layout(location = 1) in vec2 InUV;
-layout(location = 0) out vec2 OutUV;
+layout(location = 0) out vec4 OutColor;
 
 void
 main()
 {
     gl_Position = Entity.MVPMatrix * vec4(InPosition, 1);
-    OutUV = InUV;
+    OutColor = vec4(InPosition.r, -InPosition.g, InPosition.b, 0.8);
 }

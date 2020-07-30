@@ -127,7 +127,7 @@ create_default_vulkan_state(vulkan_instance *VulkanInstance, vulkan_state *Vulka
     auto *UniformBuffers = &VulkanState->UniformBuffers;
 
     // Uniform Buffers
-    ctk::push(UniformBuffers, "entity", vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, 64, sizeof(entity_ubo),
+    ctk::push(UniformBuffers, "entity", vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, 1024, sizeof(entity_ubo),
                                                                    Swapchain->Images.Count));
     ctk::push(UniformBuffers, "light", vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, 64, sizeof(light_ubo),
                                                                   Swapchain->Images.Count));
@@ -521,6 +521,13 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
     return VulkanState;
 }
 
+entity *
+push_entity(scene *Scene, cstr Name)
+{
+    ctk::push(&Scene->EntityUBOs);
+    return ctk::push(&Scene->Entities, Name);
+}
+
 scene *
 create_scene(assets *Assets, vulkan_state *VulkanState, cstr Path)
 {
@@ -539,8 +546,7 @@ create_scene(assets *Assets, vulkan_state *VulkanState, cstr Path)
     for(u32 EntityIndex = 0; EntityIndex < EntityMap->Children.Count; ++EntityIndex)
     {
         ctk::data *EntityData = ctk::at(EntityMap, EntityIndex);
-        entity *Entity = ctk::push(&Scene->Entities, EntityData->Key.Data);
-        ctk::push(&Scene->EntityUBOs);
+        entity *Entity = push_entity(Scene, EntityData->Key.Data);
 
         // Transform
         Entity->Transform = load_transform(ctk::at(EntityData, "transform"));
@@ -575,56 +581,10 @@ create_scene(assets *Assets, vulkan_state *VulkanState, cstr Path)
 }
 
 void
-update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene)
-{
-    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
-    transform *CameraTransform = &Scene->Camera.Transform;
-
-    ////////////////////////////////////////////////////////////
-    /// Entity UBOs
-    ////////////////////////////////////////////////////////////
-
-    // View Matrix
-    glm::vec3 CameraPosition = { CameraTransform->Position.X, CameraTransform->Position.Y, CameraTransform->Position.Z };
-    glm::mat4 CameraMatrix(1.0f);
-    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.X), { 1.0f, 0.0f, 0.0f });
-    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.Y), { 0.0f, 1.0f, 0.0f });
-    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
-    CameraMatrix = glm::translate(CameraMatrix, CameraPosition);
-    glm::vec3 CameraForward = { CameraMatrix[0][2], CameraMatrix[1][2], CameraMatrix[2][2] };
-    glm::mat4 ViewMatrix = glm::lookAt(CameraPosition, CameraPosition + CameraForward, { 0.0f, -1.0f, 0.0f });
-
-    // Projection Matrix
-    f32 Aspect = Swapchain->Extent.width / (f32)Swapchain->Extent.height;
-    glm::mat4 ProjectionMatrix = glm::perspective(glm::radians(Scene->Camera.FieldOfView), Aspect, 0.1f, 1000.0f);
-    ProjectionMatrix[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
-
-    // Entity Model Matrixes
-    for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex)
-    {
-        transform *EntityTransform = &Scene->Entities.Values[EntityIndex].Transform;
-        glm::mat4 ModelMatrix(1.0f);
-        ModelMatrix = glm::translate(ModelMatrix, { EntityTransform->Position.X, EntityTransform->Position.Y, EntityTransform->Position.Z });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.X), { 1.0f, 0.0f, 0.0f });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Y), { 0.0f, 1.0f, 0.0f });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
-        ModelMatrix = glm::scale(ModelMatrix, { EntityTransform->Scale.X, EntityTransform->Scale.Y, EntityTransform->Scale.Z });
-        Scene->EntityUBOs[EntityIndex].ModelMatrix = ModelMatrix;
-        Scene->EntityUBOs[EntityIndex].ModelViewProjectionMatrix = ProjectionMatrix * ViewMatrix * ModelMatrix;
-    }
-
-    // Write all entity ubos to current frame's entity uniform buffer region.
-    vtk::region *EntityUniformBufferRegion = Scene->EntityUniformBuffer->Regions + VulkanInstance->FrameState.CurrentFrameIndex;
-    vtk::write_to_host_region(VulkanInstance->Device.Logical, EntityUniformBufferRegion,
-                              Scene->EntityUBOs.Data, ctk::byte_count(&Scene->EntityUBOs), 0);
-}
-
-void
 record_default_command_buffers(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, scene *Scene)
 {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
-    vtk::frame_state *FrameState = &VulkanInstance->FrameState;
     vtk::render_pass *DefaultRenderPass = ctk::at(&VulkanState->RenderPasses, "default");
 
     VkRect2D RenderArea = {};
@@ -683,13 +643,11 @@ record_default_command_buffers(vulkan_instance *VulkanInstance, vulkan_state *Vu
     }
 }
 
-void
-render_default_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState)
+u32
+aquire_next_swapchain_image_index(vulkan_instance *VulkanInstance)
 {
     vtk::device *Device = &VulkanInstance->Device;
-    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
     vtk::frame_state *FrameState = &VulkanInstance->FrameState;
-
     vtk::frame *CurrentFrame = FrameState->Frames + FrameState->CurrentFrameIndex;
 
     // Wait on current frame's fence if still unsignaled.
@@ -697,8 +655,8 @@ render_default_render_pass(vulkan_instance *VulkanInstance, vulkan_state *Vulkan
 
     // Aquire next swapchain image index, using a semaphore to signal when image is available for rendering.
     u32 SwapchainImageIndex = VTK_UNSET_INDEX;
-    vtk::validate_vk_result(vkAcquireNextImageKHR(Device->Logical, Swapchain->Handle, UINT64_MAX, CurrentFrame->ImageAquiredSemaphore,
-                                                  VK_NULL_HANDLE, &SwapchainImageIndex),
+    vtk::validate_vk_result(vkAcquireNextImageKHR(Device->Logical, VulkanInstance->Swapchain.Handle, UINT64_MAX,
+                                                  CurrentFrame->ImageAquiredSemaphore, VK_NULL_HANDLE, &SwapchainImageIndex),
                             "vkAcquireNextImageKHR", "failed to aquire next swapchain image");
 
     // Wait on swapchain images previously associated frame fence before rendering.
@@ -709,6 +667,63 @@ render_default_render_pass(vulkan_instance *VulkanInstance, vulkan_state *Vulkan
     }
     vkResetFences(Device->Logical, 1, &CurrentFrame->InFlightFence);
     *PreviousFrameInFlightFence = CurrentFrame->InFlightFence;
+
+    return SwapchainImageIndex;
+}
+
+void
+update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene, u32 SwapchainImageIndex)
+{
+    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+    transform *CameraTransform = &Scene->Camera.Transform;
+
+    ////////////////////////////////////////////////////////////
+    /// Entity UBOs
+    ////////////////////////////////////////////////////////////
+
+    // View Matrix
+    glm::vec3 CameraPosition = { CameraTransform->Position.X, CameraTransform->Position.Y, CameraTransform->Position.Z };
+    glm::mat4 CameraMatrix(1.0f);
+    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.X), { 1.0f, 0.0f, 0.0f });
+    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.Y), { 0.0f, 1.0f, 0.0f });
+    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
+    CameraMatrix = glm::translate(CameraMatrix, CameraPosition);
+    glm::vec3 CameraForward = { CameraMatrix[0][2], CameraMatrix[1][2], CameraMatrix[2][2] };
+    glm::mat4 ViewMatrix = glm::lookAt(CameraPosition, CameraPosition + CameraForward, { 0.0f, -1.0f, 0.0f });
+
+    // Projection Matrix
+    f32 Aspect = Swapchain->Extent.width / (f32)Swapchain->Extent.height;
+    glm::mat4 ProjectionMatrix = glm::perspective(glm::radians(Scene->Camera.FieldOfView), Aspect, 0.1f, 1000.0f);
+    ProjectionMatrix[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
+
+    // Entity Model Matrixes
+    for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex)
+    {
+        transform *EntityTransform = &Scene->Entities.Values[EntityIndex].Transform;
+        glm::mat4 ModelMatrix(1.0f);
+        ModelMatrix = glm::translate(ModelMatrix, { EntityTransform->Position.X, EntityTransform->Position.Y, EntityTransform->Position.Z });
+        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.X), { 1.0f, 0.0f, 0.0f });
+        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Y), { 0.0f, 1.0f, 0.0f });
+        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
+        ModelMatrix = glm::scale(ModelMatrix, { EntityTransform->Scale.X, EntityTransform->Scale.Y, EntityTransform->Scale.Z });
+        Scene->EntityUBOs[EntityIndex].ModelMatrix = ModelMatrix;
+        Scene->EntityUBOs[EntityIndex].ModelViewProjectionMatrix = ProjectionMatrix * ViewMatrix * ModelMatrix;
+    }
+
+    // Write all entity ubos to current frame's entity uniform buffer region.
+    vtk::region *EntityUniformBufferRegion = Scene->EntityUniformBuffer->Regions + SwapchainImageIndex;
+    vtk::write_to_host_region(VulkanInstance->Device.Logical, EntityUniformBufferRegion,
+                              Scene->EntityUBOs.Data, ctk::byte_count(&Scene->EntityUBOs), 0);
+}
+
+void
+render_default_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, u32 SwapchainImageIndex)
+{
+    vtk::device *Device = &VulkanInstance->Device;
+    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+    vtk::frame_state *FrameState = &VulkanInstance->FrameState;
+
+    vtk::frame *CurrentFrame = FrameState->Frames + FrameState->CurrentFrameIndex;
 
     ////////////////////////////////////////////////////////////
     /// Command Buffers Submission

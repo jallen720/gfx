@@ -2,6 +2,17 @@
 #include "gfx/graphics.h"
 #include "ctk/data.h"
 
+// Tests
+#include "gfx/tests/default.h"
+#include "gfx/tests/stencil.h"
+#include "gfx/tests/transparency.h"
+
+#define SELECT_TEST(NAME)\
+    void (*test_create_state)(vulkan_instance *, assets *, vulkan_state *) = NAME##_test_create_state;\
+    scene *(*test_create_scene)(assets *, vulkan_state *) = NAME##_test_create_scene;\
+    void (*test_init)(vulkan_instance *, assets *, vulkan_state *, scene *) = NAME##_test_init;\
+    void (*test_update)(vulkan_instance *, vulkan_state *, u32) = NAME##_test_update;
+
 ////////////////////////////////////////////////////////////
 /// Internal
 ////////////////////////////////////////////////////////////
@@ -59,19 +70,6 @@ struct test_state
 };
 
 ////////////////////////////////////////////////////////////
-/// Tests
-////////////////////////////////////////////////////////////
-#include "gfx/tests/default.h"
-#include "gfx/tests/stencil.h"
-#include "gfx/tests/transparency.h"
-
-#define SELECT_TEST(NAME)\
-    void (*test_create_state)(vulkan_instance *, assets *, vulkan_state *) = NAME##_test_create_state;\
-    scene *(*test_create_scene)(assets *, vulkan_state *) = NAME##_test_create_scene;\
-    void (*test_init)(vulkan_instance *, assets *, vulkan_state *, scene *) = NAME##_test_init;\
-    void (*test_update)(vulkan_instance *, vulkan_state *) = NAME##_test_update;
-
-////////////////////////////////////////////////////////////
 /// Main
 ////////////////////////////////////////////////////////////
 s32
@@ -98,8 +96,9 @@ main()
         // Frame processing.
         update_input_state(&InputState, Window->Handle);
         camera_controls(&Scene->Camera.Transform, &InputState);
-        update_uniform_data(VulkanInstance, Scene);
-        test_update(VulkanInstance, VulkanState);
+        u32 SwapchainImageIndex = aquire_next_swapchain_image_index(VulkanInstance);
+        update_uniform_data(VulkanInstance, Scene, SwapchainImageIndex);
+        test_update(VulkanInstance, VulkanState, SwapchainImageIndex);
         Sleep(1);
     }
 }

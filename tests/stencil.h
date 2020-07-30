@@ -167,7 +167,7 @@ stencil_test_init(vulkan_instance *VulkanInstance, assets *Assets, vulkan_state 
 }
 
 static void
-stencil_test_update(vulkan_instance *VulkanInstance, vulkan_state *VulkanState)
+stencil_test_update(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, u32 SwapchainImageIndex)
 {
-    render_default_render_pass(VulkanInstance, VulkanState);
+    render_default_render_pass(VulkanInstance, VulkanState, SwapchainImageIndex);
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ctk/math.h"
+
 static void
 transparency_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, vulkan_state *VulkanState)
 {
@@ -17,7 +19,6 @@ transparency_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, 
     ctk::push(&BlendedGPInfo.DescriptorSetLayouts, ctk::at(&VulkanState->DescriptorSets, "entity")->Layout);
     ctk::push(&BlendedGPInfo.DescriptorSetLayouts, ctk::at(&VulkanState->DescriptorSets, "grass_texture")->Layout);
     ctk::push(&BlendedGPInfo.VertexInputs, { 0, 0, *ctk::at(&VulkanState->VertexAttributeIndexes, "position") });
-    ctk::push(&BlendedGPInfo.VertexInputs, { 0, 1, *ctk::at(&VulkanState->VertexAttributeIndexes, "uv") });
     BlendedGPInfo.VertexLayout = &VulkanState->VertexLayout;
     ctk::push(&BlendedGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
     ctk::push(&BlendedGPInfo.Scissors, { 0, 0, Swapchain->Extent.width, Swapchain->Extent.height });
@@ -43,7 +44,19 @@ transparency_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, 
 static scene *
 transparency_test_create_scene(assets *Assets, vulkan_state *VulkanState)
 {
-    return create_scene(Assets, VulkanState, "assets/scenes/transparency_test.ctkd");
+    scene *Scene = create_scene(Assets, VulkanState, "assets/scenes/transparency_test.ctkd");
+    CTK_REPEAT(100)
+    {
+        char Name[16] = {};
+        sprintf(Name, "cube_%u", RepeatIndex);
+        entity *Cube = push_entity(Scene, Name);
+        Cube->Transform.Position = { (f32)ctk::random_range(0, 20), -(f32)ctk::random_range(0, 20), (f32)ctk::random_range(0, 20) };
+        Cube->Transform.Scale = { 1, 1, 1 };
+        ctk::push(&Cube->DescriptorSets, ctk::at(&VulkanState->DescriptorSets, "entity"));
+        Cube->GraphicsPipeline = ctk::at(&VulkanState->GraphicsPipelines, "blended");
+        Cube->Mesh = ctk::at(&Assets->Meshes, "cube");
+    }
+    return Scene;
 }
 
 static void
@@ -53,7 +66,7 @@ transparency_test_init(vulkan_instance *VulkanInstance, assets *Assets, vulkan_s
 }
 
 static void
-transparency_test_update(vulkan_instance *VulkanInstance, vulkan_state *VulkanState)
+transparency_test_update(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, u32 SwapchainImageIndex)
 {
-    render_default_render_pass(VulkanInstance, VulkanState);
+    render_default_render_pass(VulkanInstance, VulkanState, SwapchainImageIndex);
 }

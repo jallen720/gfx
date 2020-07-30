@@ -122,8 +122,8 @@ struct entity
 struct scene
 {
     camera Camera;
-    ctk::smap<entity, 64> Entities;
-    ctk::sarray<entity_ubo, 64> EntityUBOs;
+    ctk::smap<entity, 1024> Entities;
+    ctk::sarray<entity_ubo, 1024> EntityUBOs;
     vtk::uniform_buffer *EntityUniformBuffer;
 };
 
@@ -142,17 +142,23 @@ create_assets(vulkan_instance *VulkanInstance);
 vulkan_state *
 create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets);
 
+entity*
+push_entity(scene* Scene, cstr Name);
+
 scene *
 create_scene(assets *Assets, vulkan_state *VulkanState, cstr Path);
 
 void
-update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene);
-
-void
 record_default_command_buffers(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, scene *Scene);
 
+u32
+aquire_next_swapchain_image_index(vulkan_instance *VulkanInstance);
+
 void
-render_default_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState);
+update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene, u32 SwapchainImageIndex);
+
+void
+render_default_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, u32 SwapchainImageIndex);
 
 void
 local_translate(transform *Transform, ctk::vec3<f32> Translation);
