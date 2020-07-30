@@ -10,6 +10,6 @@ void
 main()
 {
     vec4 SampledAlbedo = texture(AlbedoTexture, InUV);
-    if (SampledAlbedo.a < 1) discard;
+    // if (SampledAlbedo.a < 1) discard;
     OutColor = texture(AlbedoTexture, InUV);
 }

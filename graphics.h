@@ -142,6 +142,9 @@ create_assets(vulkan_instance *VulkanInstance);
 vulkan_state *
 create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets);
 
+scene *
+create_scene(assets *Assets, vulkan_state *VulkanState, cstr Path);
+
 void
 update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene);
 
@@ -150,3 +153,6 @@ record_default_command_buffers(vulkan_instance *VulkanInstance, vulkan_state *Vu
 
 void
 render_default_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState);
+
+void
+local_translate(transform *Transform, ctk::vec3<f32> Translation);

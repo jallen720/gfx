@@ -1,7 +1,7 @@
 #pragma once
 
 static void
-stencil_test_init(vulkan_instance *VulkanInstance, assets *Assets, vulkan_state *VulkanState, scene *Scene)
+stencil_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, vulkan_state *VulkanState)
 {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
@@ -69,6 +69,21 @@ stencil_test_init(vulkan_instance *VulkanInstance, assets *Assets, vulkan_state 
     OutlineGPInfo.DepthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
     *OutlineGP = vtk::create_graphics_pipeline(VulkanInstance->Device.Logical, DefaultRP, &OutlineGPInfo);
+}
+
+static scene *
+stencil_test_create_scene(assets *Assets, vulkan_state *VulkanState)
+{
+    return create_scene(Assets, VulkanState, "assets/scenes/default.ctkd");
+}
+
+static void
+stencil_test_init(vulkan_instance *VulkanInstance, assets *Assets, vulkan_state *VulkanState, scene *Scene)
+{
+    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+    vtk::render_pass *DefaultRP = ctk::at(&VulkanState->RenderPasses, "default");
+    vtk::graphics_pipeline *StencilRenderGP = ctk::at(&VulkanState->GraphicsPipelines, "stencil_render");
+    vtk::graphics_pipeline *OutlineGP = ctk::at(&VulkanState->GraphicsPipelines, "outline");
 
     ////////////////////////////////////////////////////////////
     /// Record Command Buffers

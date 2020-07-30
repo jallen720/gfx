@@ -35,6 +35,13 @@ descriptors
         count 1
         texture brick
     }
+    transparent_window_texture
+    {
+        type VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+        shader_stage_flags [ VK_SHADER_STAGE_FRAGMENT_BIT ]
+        count 1
+        texture transparent_window
+    }
 }
 descriptor_sets
 {
@@ -66,6 +73,12 @@ descriptor_sets
     {
         type static
         descriptor_bindings [ { binding 0 descriptor brick_texture } ]
+        color_blend_attachment_states 1
+    }
+    transparent_window_texture
+    {
+        type static
+        descriptor_bindings [ { binding 0 descriptor transparent_window_texture } ]
         color_blend_attachment_states 1
     }
 }

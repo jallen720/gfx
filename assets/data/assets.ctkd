@@ -20,6 +20,11 @@ textures
         path assets/textures/brick.jpeg
         filter VK_FILTER_LINEAR
     }
+    transparent_window
+    {
+        path assets/textures/transparent_window.png
+        filter VK_FILTER_LINEAR
+    }
 }
 shader_modules
 {
@@ -55,11 +60,23 @@ shader_modules
         path assets/shaders/stencil/outline.frag.spv
         stage VK_SHADER_STAGE_FRAGMENT_BIT
     }
+
+    # Transparency
+    blended_vert
+    {
+        path assets/shaders/transparency/blended.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    blended_frag
+    {
+        path assets/shaders/transparency/blended.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
 }
 models
 {
     cube { path assets/models/cube.obj }
-    true_cube { path assets/models/true_cube.obj }
+    centered_cube { path assets/models/centered_cube.obj }
     quad { path assets/models/quad.obj }
     sibenik { path assets/models/sibenik/sibenik.obj }
     fullscreen_plane { path assets/models/fullscreen_plane.obj }

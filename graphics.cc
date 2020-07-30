@@ -200,6 +200,29 @@ create_default_vulkan_state(vulkan_instance *VulkanInstance, vulkan_state *Vulka
                                                                              &DefaultRenderPassInfo));
 }
 
+static ctk::vec3<f32>
+load_vec3(ctk::data *Data)
+{
+    return { ctk::to_f32(Data, 0u), ctk::to_f32(Data, 1u), ctk::to_f32(Data, 2u) };
+}
+
+static transform
+load_transform(ctk::data *Data)
+{
+    transform Transform = {};
+    if(Data->Children.Count == 0)
+    {
+        Transform.Scale = { 1, 1, 1 };
+    }
+    else
+    {
+        Transform.Position = load_vec3(ctk::at(Data, "position"));
+        Transform.Rotation = load_vec3(ctk::at(Data, "rotation"));
+        Transform.Scale = load_vec3(ctk::at(Data, "scale"));
+    }
+    return Transform;
+}
+
 ////////////////////////////////////////////////////////////
 /// Interface
 ////////////////////////////////////////////////////////////
@@ -497,6 +520,59 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
     return VulkanState;
 }
 
+scene *
+create_scene(assets *Assets, vulkan_state *VulkanState, cstr Path)
+{
+    scene *Scene = ctk::allocate<scene>();
+    *Scene = {};
+
+    ctk::data SceneData = ctk::load_data(Path);
+
+    // Camera
+    ctk::data *CameraData = ctk::at(&SceneData, "camera");
+    Scene->Camera.Transform = load_transform(ctk::at(CameraData, "transform"));
+    Scene->Camera.FieldOfView = ctk::to_f32(CameraData, "field_of_view");
+
+    // Entities
+    ctk::data *EntityMap = ctk::at(&SceneData, "entities");
+    for(u32 EntityIndex = 0; EntityIndex < EntityMap->Children.Count; ++EntityIndex)
+    {
+        ctk::data *EntityData = ctk::at(EntityMap, EntityIndex);
+        entity *Entity = ctk::push(&Scene->Entities, EntityData->Key.Data);
+        ctk::push(&Scene->EntityUBOs);
+
+        // Transform
+        Entity->Transform = load_transform(ctk::at(EntityData, "transform"));
+
+        // Descriptor Sets (optional)
+        ctk::data *DescriptorSetArray = ctk::find(EntityData, "descriptor_sets");
+        if(DescriptorSetArray)
+        {
+            for(u32 DescriptorSetIndex = 0; DescriptorSetIndex < DescriptorSetArray->Children.Count; ++DescriptorSetIndex)
+            {
+                ctk::push(&Entity->DescriptorSets, ctk::at(&VulkanState->DescriptorSets, ctk::to_cstr(DescriptorSetArray,
+                                                                                                      DescriptorSetIndex)));
+            }
+        }
+
+        // Graphics Pipeline (optional)
+        ctk::data *GraphicsPipelineName = ctk::find(EntityData, "graphics_pipeline");
+        if(GraphicsPipelineName)
+        {
+            Entity->GraphicsPipeline = ctk::at(&VulkanState->GraphicsPipelines, ctk::to_cstr(GraphicsPipelineName));
+        }
+
+        // Mesh
+        Entity->Mesh = ctk::at(&Assets->Meshes, ctk::to_cstr(EntityData, "mesh"));
+    }
+    Scene->EntityUniformBuffer = ctk::at(&VulkanState->UniformBuffers, "entity");
+
+    // Cleanup
+    ctk::_free(&SceneData);
+
+    return Scene;
+}
+
 void
 update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene)
 {
@@ -678,4 +754,37 @@ render_default_render_pass(vulkan_instance *VulkanInstance, vulkan_state *Vulkan
 
     // Cycle frame.
     FrameState->CurrentFrameIndex = (FrameState->CurrentFrameIndex + 1) % FrameState->Frames.Count;
+}
+
+void
+local_translate(transform *Transform, ctk::vec3<f32> Translation)
+{
+    ctk::vec3<f32> *Position = &Transform->Position;
+    ctk::vec3<f32> *Rotation = &Transform->Rotation;
+
+    glm::mat4 WorldMatrix(1.0f);
+    WorldMatrix = glm::rotate(WorldMatrix, glm::radians(Rotation->X), { 1.0f, 0.0f, 0.0f });
+    WorldMatrix = glm::rotate(WorldMatrix, glm::radians(Rotation->Y), { 0.0f, 1.0f, 0.0f });
+    WorldMatrix = glm::rotate(WorldMatrix, glm::radians(Rotation->Z), { 0.0f, 0.0f, 1.0f });
+    WorldMatrix = glm::translate(WorldMatrix, { Position->X, Position->Y, Position->Z });
+
+    ctk::vec3<f32> Right = {};
+    Right.X = WorldMatrix[0][0];
+    Right.Y = WorldMatrix[1][0];
+    Right.Z = WorldMatrix[2][0];
+
+    ctk::vec3<f32> Up = {};
+    Up.X = WorldMatrix[0][1];
+    Up.Y = WorldMatrix[1][1];
+    Up.Z = WorldMatrix[2][1];
+
+    ctk::vec3<f32> Forward = {};
+    Forward.X = WorldMatrix[0][2];
+    Forward.Y = WorldMatrix[1][2];
+    Forward.Z = WorldMatrix[2][2];
+
+    ctk::vec3<f32> NewPosition = *Position;
+    NewPosition = NewPosition + (Right * Translation.X);
+    NewPosition = NewPosition + (Up * Translation.Y);
+    *Position = NewPosition + (Forward * Translation.Z);
 }
