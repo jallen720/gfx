@@ -24,6 +24,7 @@ stencil_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, vulka
     StencilRenderGPInfo.VertexLayout = &VulkanState->VertexLayout;
     ctk::push(&StencilRenderGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
     ctk::push(&StencilRenderGPInfo.Scissors, { 0, 0, Swapchain->Extent.width, Swapchain->Extent.height });
+    ctk::push(&StencilRenderGPInfo.ColorBlendAttachmentStates, vtk::default_color_blend_attachment_state());
 
     StencilRenderGPInfo.DepthStencilState.stencilTestEnable = VK_TRUE;
     StencilRenderGPInfo.DepthStencilState.back.compareOp = VK_COMPARE_OP_ALWAYS;
@@ -51,6 +52,7 @@ stencil_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, vulka
     OutlineGPInfo.VertexLayout = &VulkanState->VertexLayout;
     ctk::push(&OutlineGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
     ctk::push(&OutlineGPInfo.Scissors, { 0, 0, Swapchain->Extent.width, Swapchain->Extent.height });
+    ctk::push(&OutlineGPInfo.ColorBlendAttachmentStates, vtk::default_color_blend_attachment_state());
 
     OutlineGPInfo.RasterizationState.cullMode = VK_CULL_MODE_NONE;
 

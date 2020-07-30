@@ -21,6 +21,17 @@ transparency_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, 
     BlendedGPInfo.VertexLayout = &VulkanState->VertexLayout;
     ctk::push(&BlendedGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
     ctk::push(&BlendedGPInfo.Scissors, { 0, 0, Swapchain->Extent.width, Swapchain->Extent.height });
+    ctk::push(&BlendedGPInfo.ColorBlendAttachmentStates,
+              {
+                  VK_TRUE,
+                  VK_BLEND_FACTOR_SRC_ALPHA,
+                  VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+                  VK_BLEND_OP_ADD,
+                  VK_BLEND_FACTOR_ONE,
+                  VK_BLEND_FACTOR_ZERO,
+                  VK_BLEND_OP_ADD,
+                  VTK_COLOR_COMPONENT_RGBA,
+              });
     BlendedGPInfo.DepthStencilState.depthTestEnable = VK_TRUE;
     BlendedGPInfo.DepthStencilState.depthWriteEnable = VK_TRUE;
     BlendedGPInfo.DepthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;

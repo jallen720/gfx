@@ -508,6 +508,7 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
         // Misc.
         ctk::push(&GraphicsPipelineInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
         ctk::push(&GraphicsPipelineInfo.Scissors, { 0, 0, Swapchain->Extent.width, Swapchain->Extent.height });
+        ctk::push(&GraphicsPipelineInfo.ColorBlendAttachmentStates, vtk::default_color_blend_attachment_state());
         GraphicsPipelineInfo.InputAssemblyState.topology =
             vtk::get_vk_primitive_topology(ctk::to_cstr(GraphicsPipelineData, "primitive_topology"));
         GraphicsPipelineInfo.DepthStencilState.depthTestEnable = vtk::get_vk_bool_32(ctk::to_cstr(GraphicsPipelineData, "depth_testing"));
