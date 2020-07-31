@@ -96,6 +96,7 @@ graphics_pipelines
         depth_testing VK_TRUE
         depth_writing VK_TRUE
         render_pass default
+        subpass 0
         shader_modules
         [
             unlit_texture_vert

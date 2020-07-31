@@ -72,6 +72,16 @@ shader_modules
         path assets/shaders/transparency/blended.frag.spv
         stage VK_SHADER_STAGE_FRAGMENT_BIT
     }
+    present_vert
+    {
+        path assets/shaders/transparency/present.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    present_frag
+    {
+        path assets/shaders/transparency/present.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
 }
 models
 {

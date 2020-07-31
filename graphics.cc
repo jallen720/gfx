@@ -518,6 +518,7 @@ create_vulkan_state(vulkan_instance *VulkanInstance, assets *Assets)
             vtk::get_vk_primitive_topology(ctk::to_cstr(GraphicsPipelineData, "primitive_topology"));
         GraphicsPipelineInfo.DepthStencilState.depthTestEnable = vtk::get_vk_bool_32(ctk::to_cstr(GraphicsPipelineData, "depth_testing"));
         GraphicsPipelineInfo.DepthStencilState.depthWriteEnable = vtk::get_vk_bool_32(ctk::to_cstr(GraphicsPipelineData, "depth_writing"));
+        GraphicsPipelineInfo.Subpass = ctk::to_u32(GraphicsPipelineData, "subpass");
         vtk::render_pass *RenderPass = ctk::at(&VulkanState->RenderPasses, ctk::to_cstr(GraphicsPipelineData, "render_pass"));
         ctk::push(&VulkanState->GraphicsPipelines, GraphicsPipelineData->Key.Data,
                   vtk::create_graphics_pipeline(Device->Logical, RenderPass, &GraphicsPipelineInfo));
