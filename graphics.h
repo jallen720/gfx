@@ -78,7 +78,7 @@ struct vulkan_state
     ctk::smap<vtk::descriptor_set, 16> DescriptorSets;
     ctk::smap<u32, 4> VertexAttributeIndexes;
     ctk::smap<vtk::graphics_pipeline, 16> GraphicsPipelines;
-    vtk::image DepthImage;
+    ctk::smap<vtk::image, 4> Images;
     ctk::smap<vtk::render_pass, 4> RenderPasses;
 };
 
@@ -149,7 +149,7 @@ scene *
 create_scene(assets *Assets, vulkan_state *VulkanState, cstr Path);
 
 void
-record_default_command_buffers(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, scene *Scene);
+record_default_command_buffers(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, vtk::render_pass *RenderPass, scene *Scene);
 
 u32
 aquire_next_swapchain_image_index(vulkan_instance *VulkanInstance);
@@ -158,7 +158,7 @@ void
 update_uniform_data(vulkan_instance *VulkanInstance, scene *Scene, u32 SwapchainImageIndex);
 
 void
-render_default_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, u32 SwapchainImageIndex);
+submit_render_pass(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, vtk::render_pass *RenderPass, u32 SwapchainImageIndex);
 
 void
 local_translate(transform *Transform, ctk::vec3<f32> Translation);

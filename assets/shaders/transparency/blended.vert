@@ -15,5 +15,5 @@ void
 main()
 {
     gl_Position = Entity.MVPMatrix * vec4(InPosition, 1);
-    OutColor = vec4(InPosition.r, -InPosition.g, InPosition.b, 0.8);
+    OutColor = vec4(InPosition.r, -InPosition.g, InPosition.b, 0.5);
 }
