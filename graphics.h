@@ -67,7 +67,7 @@ struct assets
 {
     ctk::smap<mesh, 16> Meshes;
     ctk::smap<vtk::texture, 16> Textures;
-    ctk::smap<vtk::shader_module, 16> ShaderModules;
+    ctk::smap<vtk::shader_module, 32> ShaderModules;
 };
 
 struct vulkan_state

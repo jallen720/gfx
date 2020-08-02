@@ -5,7 +5,8 @@
 // Tests
 #include "gfx/tests/default.h"
 #include "gfx/tests/stencil.h"
-#include "gfx/tests/transparency.h"
+#include "gfx/tests/input_attachments.h"
+#include "gfx/tests/depth_peeling.h"
 
 #define SELECT_TEST(NAME)\
     void (*test_create_state)(vulkan_instance *, assets *, vulkan_state *) = NAME##_test_create_state;\
@@ -80,7 +81,7 @@ main()
     vulkan_instance *VulkanInstance = create_vulkan_instance(Window);
     assets *Assets = create_assets(VulkanInstance);
     vulkan_state *VulkanState = create_vulkan_state(VulkanInstance, Assets);
-    SELECT_TEST(transparency)
+    SELECT_TEST(depth_peeling)
     test_create_state(VulkanInstance, Assets, VulkanState);
     scene *Scene = test_create_scene(Assets, VulkanState);
     test_init(VulkanInstance, Assets, VulkanState, Scene);

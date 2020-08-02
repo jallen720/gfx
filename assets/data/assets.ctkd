@@ -61,25 +61,47 @@ shader_modules
         stage VK_SHADER_STAGE_FRAGMENT_BIT
     }
 
-    # Transparency
+    # Input Attachments
     blended_vert
     {
-        path assets/shaders/transparency/blended.vert.spv
+        path assets/shaders/input_attachments/blended.vert.spv
         stage VK_SHADER_STAGE_VERTEX_BIT
     }
     blended_frag
     {
-        path assets/shaders/transparency/blended.frag.spv
+        path assets/shaders/input_attachments/blended.frag.spv
         stage VK_SHADER_STAGE_FRAGMENT_BIT
     }
     present_vert
     {
-        path assets/shaders/transparency/present.vert.spv
+        path assets/shaders/input_attachments/present.vert.spv
         stage VK_SHADER_STAGE_VERTEX_BIT
     }
     present_frag
     {
-        path assets/shaders/transparency/present.frag.spv
+        path assets/shaders/input_attachments/present.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
+
+    # Depth Peeling
+    depth_peeling_blended_vert
+    {
+        path assets/shaders/depth_peeling/blended.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    depth_peeling_blended_frag
+    {
+        path assets/shaders/depth_peeling/blended.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
+    depth_peeling_present_vert
+    {
+        path assets/shaders/depth_peeling/present.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    depth_peeling_present_frag
+    {
+        path assets/shaders/depth_peeling/present.frag.spv
         stage VK_SHADER_STAGE_FRAGMENT_BIT
     }
 }

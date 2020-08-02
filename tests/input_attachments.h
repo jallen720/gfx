@@ -2,7 +2,7 @@
 
 #include "ctk/math.h"
 
-struct transparency_test
+struct input_attachments_test
 {
     ctk::sarray<vtk::image, 4> DepthImages;
     ctk::sarray<vtk::image, 4> ColorImages;
@@ -11,10 +11,10 @@ struct transparency_test
     ctk::sarray<VkDescriptorSet, 4> PresentDescriptorSets;
 };
 
-static transparency_test TransparencyTest = {};
+static input_attachments_test InputAttachmentsTest = {};
 
 static void
-transparency_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, vulkan_state *VulkanState)
+input_attachments_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, vulkan_state *VulkanState)
 {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
@@ -42,8 +42,8 @@ transparency_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, 
 
     CTK_REPEAT(Swapchain->Images.Count)
     {
-        ctk::push(&TransparencyTest.DepthImages, vtk::create_image(Device, &DepthImageInfo));
-        ctk::push(&TransparencyTest.ColorImages, vtk::create_image(Device, &ColorImageInfo));
+        ctk::push(&InputAttachmentsTest.DepthImages, vtk::create_image(Device, &DepthImageInfo));
+        ctk::push(&InputAttachmentsTest.ColorImages, vtk::create_image(Device, &ColorImageInfo));
     }
 
     ////////////////////////////////////////////////////////////
@@ -129,8 +129,8 @@ transparency_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, 
     CTK_REPEAT(Swapchain->Images.Count)
     {
         vtk::framebuffer_info *FramebufferInfo = ctk::push(&TestRenderPassInfo.FramebufferInfos);
-        ctk::push(&FramebufferInfo->Attachments, TransparencyTest.DepthImages[RepeatIndex].View);
-        ctk::push(&FramebufferInfo->Attachments, TransparencyTest.ColorImages[RepeatIndex].View);
+        ctk::push(&FramebufferInfo->Attachments, InputAttachmentsTest.DepthImages[RepeatIndex].View);
+        ctk::push(&FramebufferInfo->Attachments, InputAttachmentsTest.ColorImages[RepeatIndex].View);
         ctk::push(&FramebufferInfo->Attachments, Swapchain->Images[RepeatIndex].View);
         FramebufferInfo->Extent = Swapchain->Extent;
         FramebufferInfo->Layers = 1;
@@ -153,7 +153,7 @@ transparency_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, 
     DescriptorPoolCreateInfo.poolSizeCount = DescriptorPoolSizes.Count;
     DescriptorPoolCreateInfo.pPoolSizes = DescriptorPoolSizes.Data;
     vtk::validate_vk_result(vkCreateDescriptorPool(Device->Logical, &DescriptorPoolCreateInfo, NULL,
-                                                   &TransparencyTest.PresentDescriptorPool),
+                                                   &InputAttachmentsTest.PresentDescriptorPool),
                             "vkCreateDescriptorPool", "failed to create descriptor pool");
 
     // Layout
@@ -166,34 +166,34 @@ transparency_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, 
     DescriptorSetLayoutCreateInfo.bindingCount = LayoutBindings.Count;
     DescriptorSetLayoutCreateInfo.pBindings = LayoutBindings.Data;
     vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &DescriptorSetLayoutCreateInfo, NULL,
-                                                        &TransparencyTest.PresentDescriptorSetLayout),
+                                                        &InputAttachmentsTest.PresentDescriptorSetLayout),
                             "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
 
     // Allocation
-    TransparencyTest.PresentDescriptorSets.Count = Swapchain->Images.Count;
+    InputAttachmentsTest.PresentDescriptorSets.Count = Swapchain->Images.Count;
     ctk::sarray<VkDescriptorSetLayout, 4> DuplicateLayouts = {};
     CTK_REPEAT(Swapchain->Images.Count)
     {
-        ctk::push(&DuplicateLayouts, TransparencyTest.PresentDescriptorSetLayout);
+        ctk::push(&DuplicateLayouts, InputAttachmentsTest.PresentDescriptorSetLayout);
     }
 
     VkDescriptorSetAllocateInfo DescriptorSetAllocateInfo = {};
     DescriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    DescriptorSetAllocateInfo.descriptorPool = TransparencyTest.PresentDescriptorPool;
-    DescriptorSetAllocateInfo.descriptorSetCount = TransparencyTest.PresentDescriptorSets.Count;
+    DescriptorSetAllocateInfo.descriptorPool = InputAttachmentsTest.PresentDescriptorPool;
+    DescriptorSetAllocateInfo.descriptorSetCount = InputAttachmentsTest.PresentDescriptorSets.Count;
     DescriptorSetAllocateInfo.pSetLayouts = DuplicateLayouts.Data;
 
-    vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &DescriptorSetAllocateInfo, TransparencyTest.PresentDescriptorSets.Data),
-                       "vkAllocateDescriptorSets", "failed to allocate descriptor sets");
+    vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &DescriptorSetAllocateInfo, InputAttachmentsTest.PresentDescriptorSets.Data),
+                            "vkAllocateDescriptorSets", "failed to allocate descriptor sets");
 
     // Updates
     ctk::sarray<VkDescriptorImageInfo, 16> DescriptorImageInfos = {};
     ctk::sarray<VkWriteDescriptorSet, 16> WriteDescriptorSets = {};
     CTK_REPEAT(Swapchain->Images.Count)
     {
-        vtk::image *DepthImage = TransparencyTest.DepthImages + RepeatIndex;
-        vtk::image *ColorImage = TransparencyTest.ColorImages + RepeatIndex;
-        VkDescriptorSet PresentDescriptorSet = TransparencyTest.PresentDescriptorSets[RepeatIndex];
+        vtk::image *DepthImage = InputAttachmentsTest.DepthImages + RepeatIndex;
+        vtk::image *ColorImage = InputAttachmentsTest.ColorImages + RepeatIndex;
+        VkDescriptorSet PresentDescriptorSet = InputAttachmentsTest.PresentDescriptorSets[RepeatIndex];
 
         VkWriteDescriptorSet *DepthWriteDescriptorSet = ctk::push(&WriteDescriptorSets);
         DepthWriteDescriptorSet->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -263,7 +263,7 @@ transparency_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, 
     vtk::graphics_pipeline_info PresentGPInfo = vtk::default_graphics_pipeline_info();
     ctk::push(&PresentGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "present_vert"));
     ctk::push(&PresentGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "present_frag"));
-    ctk::push(&PresentGPInfo.DescriptorSetLayouts, TransparencyTest.PresentDescriptorSetLayout);
+    ctk::push(&PresentGPInfo.DescriptorSetLayouts, InputAttachmentsTest.PresentDescriptorSetLayout);
     ctk::push(&PresentGPInfo.VertexInputs, { 0, 0, *ctk::at(&VulkanState->VertexAttributeIndexes, "position") });
     PresentGPInfo.VertexLayout = &VulkanState->VertexLayout;
     ctk::push(&PresentGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
@@ -299,9 +299,9 @@ transparency_test_create_state(vulkan_instance *VulkanInstance, assets *Assets, 
 }
 
 static scene *
-transparency_test_create_scene(assets *Assets, vulkan_state *VulkanState)
+input_attachments_test_create_scene(assets *Assets, vulkan_state *VulkanState)
 {
-    scene *Scene = create_scene(Assets, VulkanState, "assets/scenes/transparency_test.ctkd");
+    scene *Scene = create_scene(Assets, VulkanState, "assets/scenes/empty.ctkd");
     CTK_REPEAT(4)
     {
         char Name[16] = {};
@@ -317,7 +317,7 @@ transparency_test_create_scene(assets *Assets, vulkan_state *VulkanState)
 }
 
 static void
-transparency_test_init(vulkan_instance *VulkanInstance, assets *Assets, vulkan_state *VulkanState, scene *Scene)
+input_attachments_test_init(vulkan_instance *VulkanInstance, assets *Assets, vulkan_state *VulkanState, scene *Scene)
 {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
@@ -377,13 +377,11 @@ transparency_test_init(vulkan_instance *VulkanInstance, assets *Assets, vulkan_s
             vkCmdNextSubpass(CommandBuffer, VK_SUBPASS_CONTENTS_INLINE);
             vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PresentGP->Handle);
             vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PresentGP->Layout,
-                                    0, // First Set Number
-                                    1,
-                                    &TransparencyTest.PresentDescriptorSets[SwapchainImageIndex], // Sets to be bound to [first .. first + count]
-                                    0,
-                                    NULL);
+                                    0, 1, InputAttachmentsTest.PresentDescriptorSets + SwapchainImageIndex,
+                                    0, NULL);
             vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &FullscreenPlane->VertexRegion.Buffer->Handle, &FullscreenPlane->VertexRegion.Offset);
-            vkCmdBindIndexBuffer(CommandBuffer, FullscreenPlane->IndexRegion.Buffer->Handle, FullscreenPlane->IndexRegion.Offset, VK_INDEX_TYPE_UINT32);
+            vkCmdBindIndexBuffer(CommandBuffer, FullscreenPlane->IndexRegion.Buffer->Handle, FullscreenPlane->IndexRegion.Offset,
+                                 VK_INDEX_TYPE_UINT32);
             vkCmdDrawIndexed(CommandBuffer, FullscreenPlane->Indexes.Count, 1, 0, 0, 0);
 
         // End
@@ -393,7 +391,7 @@ transparency_test_init(vulkan_instance *VulkanInstance, assets *Assets, vulkan_s
 }
 
 static void
-transparency_test_update(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, u32 SwapchainImageIndex)
+input_attachments_test_update(vulkan_instance *VulkanInstance, vulkan_state *VulkanState, u32 SwapchainImageIndex)
 {
     submit_render_pass(VulkanInstance, VulkanState, ctk::at(&VulkanState->RenderPasses, "test"), SwapchainImageIndex);
 }
