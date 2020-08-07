@@ -67,12 +67,28 @@ shader_modules {
     }
 
     # Depth Peeling
+    depth_peeling_first_peel_vert {
+        path assets/shaders/depth_peeling/first_peel.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    depth_peeling_first_peel_frag {
+        path assets/shaders/depth_peeling/first_peel.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
     depth_peeling_blend_vert {
         path assets/shaders/depth_peeling/blend.vert.spv
         stage VK_SHADER_STAGE_VERTEX_BIT
     }
     depth_peeling_blend_frag {
         path assets/shaders/depth_peeling/blend.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
+    depth_peeling_peel_vert {
+        path assets/shaders/depth_peeling/peel.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    depth_peeling_peel_frag {
+        path assets/shaders/depth_peeling/peel.frag.spv
         stage VK_SHADER_STAGE_FRAGMENT_BIT
     }
 }

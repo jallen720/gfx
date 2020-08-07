@@ -3,17 +3,11 @@
 #include "gfx/tests/shared.h"
 
 struct state {
+    static const u32 DEPTH_PEEL_LAYER_COUNT = 5;
+    static const u32 DEPTH_PEEL_LAYER_SUBPASS_BASE_INDEX = 2;
     scene *Scene;
-    vtk::image DepthAttachmentImage;
-    // vtk::image ColorAttachmentImage;
     vtk::render_pass RenderPass;
     VkDescriptorPool DescriptorPool;
-    struct {
-        VkDescriptorSetLayout EntityUniformBuffer;
-    } DescriptorSetLayouts;
-    struct {
-        vtk::descriptor_set EntityUniformBuffer;
-    } DescriptorSets;
     vtk::vertex_layout VertexLayout;
     struct {
         u32 Position;
@@ -21,186 +15,30 @@ struct state {
         u32 UV;
     } VertexAttributeIndexes;
     struct {
-        vtk::graphics_pipeline Blend;
+        vtk::image PeelDepth[2];
+        vtk::image PeelColor;
+    } AttachmentImages;
+    struct {
+        VkDescriptorSetLayout EntityBuffer;
+        VkDescriptorSetLayout PeelDepthImage;
+        VkDescriptorSetLayout PeelColorImage;
+    } DescriptorSetLayouts;
+    struct {
+        vtk::descriptor_set EntityBuffer;
+        vtk::descriptor_set PeelDepthImage[2];
+        vtk::descriptor_set PeelColorImage;
+    } DescriptorSets;
+    struct {
+        vtk::graphics_pipeline FirstPeel;
+        vtk::graphics_pipeline FirstBlend;
+        vtk::graphics_pipeline Blend[DEPTH_PEEL_LAYER_COUNT];
+        vtk::graphics_pipeline Peel[DEPTH_PEEL_LAYER_COUNT];
     } GraphicsPipelines;
 };
 
 static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, assets *Assets) {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
-
-    ////////////////////////////////////////////////////////////
-    /// Attachment Images
-    ////////////////////////////////////////////////////////////
-    vtk::image_info DepthImageInfo = {};
-    DepthImageInfo.Width = Swapchain->Extent.width;
-    DepthImageInfo.Height = Swapchain->Extent.height;
-    DepthImageInfo.Format = vtk::find_depth_image_format(Device->Physical);
-    DepthImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
-    DepthImageInfo.UsageFlags = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT/* | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT*/;
-    DepthImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    DepthImageInfo.AspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    State->DepthAttachmentImage = vtk::create_image(Device, &DepthImageInfo);
-
-    // vtk::image_info ColorImageInfo = {};
-    // ColorImageInfo.Width = Swapchain->Extent.width;
-    // ColorImageInfo.Height = Swapchain->Extent.height;
-    // ColorImageInfo.Format = VK_FORMAT_R8G8B8A8_UNORM;
-    // ColorImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
-    // ColorImageInfo.UsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
-    // ColorImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    // ColorImageInfo.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    // State->ColorImage = vtk::create_image(Device, &ColorImageInfo);
-
-    ////////////////////////////////////////////////////////////
-    /// Render Pass
-    ////////////////////////////////////////////////////////////
-    vtk::render_pass_info RenderPassInfo = {};
-
-    // Attachments
-    u32 DepthAttachmentIndex = RenderPassInfo.Attachments.Count;
-    vtk::attachment *DepthAttachment = ctk::push(&RenderPassInfo.Attachments);
-    DepthAttachment->Description.format = DepthImageInfo.Format;
-    DepthAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
-    DepthAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    DepthAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    DepthAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    DepthAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    DepthAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    DepthAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    DepthAttachment->ClearValue = { 1.0f, 0 };
-
-    u32 ColorAttachmentIndex = RenderPassInfo.Attachments.Count;
-    vtk::attachment *ColorAttachment = ctk::push(&RenderPassInfo.Attachments);
-    ColorAttachment->Description.format = Swapchain->ImageFormat;
-    ColorAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
-    ColorAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    ColorAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    ColorAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    ColorAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    ColorAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    ColorAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    ColorAttachment->ClearValue = { 0.04f, 0.04f, 0.04f, 1.0f };
-
-    // Subpasses
-    vtk::subpass *Subpass = ctk::push(&RenderPassInfo.Subpasses);
-    ctk::set(&Subpass->DepthAttachmentReference, { DepthAttachmentIndex, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
-    ctk::push(&Subpass->ColorAttachmentReferences, { ColorAttachmentIndex, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
-
-    // Subpass Dependencies
-    RenderPassInfo.SubpassDependencies.Count = 1;
-    RenderPassInfo.SubpassDependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
-    RenderPassInfo.SubpassDependencies[0].dstSubpass = 0;
-    RenderPassInfo.SubpassDependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    RenderPassInfo.SubpassDependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    RenderPassInfo.SubpassDependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-    RenderPassInfo.SubpassDependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    RenderPassInfo.SubpassDependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-
-    // Framebuffer Infos
-    CTK_REPEAT(Swapchain->Images.Count) {
-        vtk::framebuffer_info *FramebufferInfo = ctk::push(&RenderPassInfo.FramebufferInfos);
-        ctk::push(&FramebufferInfo->Attachments, State->DepthAttachmentImage.View);
-        ctk::push(&FramebufferInfo->Attachments, Swapchain->Images[RepeatIndex].View);
-        FramebufferInfo->Extent = Swapchain->Extent;
-        FramebufferInfo->Layers = 1;
-    }
-
-    State->RenderPass = vtk::create_render_pass(Device->Logical, VulkanInstance->GraphicsCommandPool, &RenderPassInfo);
-
-    ////////////////////////////////////////////////////////////
-    /// Descriptor Sets
-    ////////////////////////////////////////////////////////////
-
-    // Pool
-    ctk::sarray<VkDescriptorPoolSize, 4> DescriptorPoolSizes = {};
-    ctk::push(&DescriptorPoolSizes, { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, Swapchain->Images.Count });
-    VkDescriptorPoolCreateInfo DescriptorPoolCreateInfo = {};
-    DescriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    DescriptorPoolCreateInfo.flags = 0;
-    DescriptorPoolCreateInfo.maxSets = Swapchain->Images.Count;
-    DescriptorPoolCreateInfo.poolSizeCount = DescriptorPoolSizes.Count;
-    DescriptorPoolCreateInfo.pPoolSizes = DescriptorPoolSizes.Data;
-    vtk::validate_vk_result(vkCreateDescriptorPool(Device->Logical, &DescriptorPoolCreateInfo, NULL, &State->DescriptorPool),
-                            "vkCreateDescriptorPool", "failed to create descriptor pool");
-
-    // Layouts
-    ctk::sarray<VkDescriptorSetLayoutBinding, 4> LayoutBindings = {};
-    ctk::push(&LayoutBindings, { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT });
-
-    VkDescriptorSetLayoutCreateInfo DescriptorSetLayoutCreateInfo = {};
-    DescriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    DescriptorSetLayoutCreateInfo.bindingCount = LayoutBindings.Count;
-    DescriptorSetLayoutCreateInfo.pBindings = LayoutBindings.Data;
-    vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &DescriptorSetLayoutCreateInfo, NULL,
-                                                        &State->DescriptorSetLayouts.EntityUniformBuffer),
-                            "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
-
-    // Initialization
-    vtk::descriptor_set *EntityUniformBufferDS = &State->DescriptorSets.EntityUniformBuffer;
-    EntityUniformBufferDS->Instances.Count = Swapchain->Images.Count;
-    ctk::push(&EntityUniformBufferDS->DynamicOffsets, State->Scene->EntityUniformBuffer.ElementSize);
-
-    // Allocation
-    ctk::sarray<VkDescriptorSetLayout, 4> DuplicateLayouts = {};
-    CTK_REPEAT(EntityUniformBufferDS->Instances.Count) ctk::push(&DuplicateLayouts, State->DescriptorSetLayouts.EntityUniformBuffer);
-
-    VkDescriptorSetAllocateInfo DescriptorSetAllocateInfo = {};
-    DescriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    DescriptorSetAllocateInfo.descriptorPool = State->DescriptorPool;
-    DescriptorSetAllocateInfo.descriptorSetCount = EntityUniformBufferDS->Instances.Count;
-    DescriptorSetAllocateInfo.pSetLayouts = DuplicateLayouts.Data;
-
-    vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &DescriptorSetAllocateInfo, EntityUniformBufferDS->Instances.Data),
-                            "vkAllocateDescriptorSets", "failed to allocate descriptor sets");
-
-    // Updates
-    ctk::sarray<VkDescriptorBufferInfo, 16> DescriptorBufferInfos = {};
-    ctk::sarray<VkDescriptorImageInfo, 16> DescriptorImageInfos = {};
-    ctk::sarray<VkWriteDescriptorSet, 16> WriteDescriptorSets = {};
-    CTK_REPEAT(EntityUniformBufferDS->Instances.Count) {
-        // vtk::image *DepthImage = State->DepthImages + RepeatIndex;
-        // vtk::image *ColorImage = State->ColorImages + RepeatIndex;
-        VkDescriptorSet DescriptorSet = EntityUniformBufferDS->Instances[RepeatIndex];
-
-        // VkWriteDescriptorSet *DepthWriteDescriptorSet = ctk::push(&WriteDescriptorSets);
-        // DepthWriteDescriptorSet->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        // DepthWriteDescriptorSet->dstSet = DescriptorSet;
-        // DepthWriteDescriptorSet->dstBinding = 0;
-        // DepthWriteDescriptorSet->dstArrayElement = 0;
-        // DepthWriteDescriptorSet->descriptorCount = 1;
-        // DepthWriteDescriptorSet->descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
-        // DepthWriteDescriptorSet->pImageInfo = ctk::push(&DescriptorImageInfos,
-        //                                                 { VK_NULL_HANDLE, DepthImage->View, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
-
-        // VkWriteDescriptorSet *ColorWriteDescriptorSet = ctk::push(&WriteDescriptorSets);
-        // ColorWriteDescriptorSet->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        // ColorWriteDescriptorSet->dstSet = DescriptorSet;
-        // ColorWriteDescriptorSet->dstBinding = 1;
-        // ColorWriteDescriptorSet->dstArrayElement = 0;
-        // ColorWriteDescriptorSet->descriptorCount = 1;
-        // ColorWriteDescriptorSet->descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
-        // ColorWriteDescriptorSet->pImageInfo = ctk::push(&DescriptorImageInfos,
-        //                                                 { VK_NULL_HANDLE, ColorImage->View, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
-
-        // Entity Uniform Buffer
-        vtk::region *EntityUniformBufferRegion = State->Scene->EntityUniformBuffer.Regions + RepeatIndex;
-
-        VkDescriptorBufferInfo *EntityUniformBufferInfo = ctk::push(&DescriptorBufferInfos);
-        EntityUniformBufferInfo->buffer = EntityUniformBufferRegion->Buffer->Handle;
-        EntityUniformBufferInfo->offset = EntityUniformBufferRegion->Offset;
-        EntityUniformBufferInfo->range = EntityUniformBufferRegion->Size;
-
-        VkWriteDescriptorSet *EntityUniformBufferWrite = ctk::push(&WriteDescriptorSets);
-        EntityUniformBufferWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        EntityUniformBufferWrite->dstSet = DescriptorSet;
-        EntityUniformBufferWrite->dstBinding = 0;
-        EntityUniformBufferWrite->dstArrayElement = 0;
-        EntityUniformBufferWrite->descriptorCount = 1;
-        EntityUniformBufferWrite->descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-        EntityUniformBufferWrite->pBufferInfo = EntityUniformBufferInfo;
-    }
-    vkUpdateDescriptorSets(Device->Logical, WriteDescriptorSets.Count, WriteDescriptorSets.Data, 0, NULL);
 
     ////////////////////////////////////////////////////////////
     /// Vertex Layout
@@ -210,52 +48,409 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     State->VertexAttributeIndexes.UV = vtk::push_vertex_attribute(&State->VertexLayout, 2);
 
     ////////////////////////////////////////////////////////////
+    /// Attachment Images
+    ////////////////////////////////////////////////////////////
+    vtk::image_info PeelDepthImageInfo = {};
+    PeelDepthImageInfo.Width = Swapchain->Extent.width;
+    PeelDepthImageInfo.Height = Swapchain->Extent.height;
+    PeelDepthImageInfo.Format = vtk::find_depth_image_format(Device->Physical);
+    PeelDepthImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
+    PeelDepthImageInfo.UsageFlags = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    PeelDepthImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    PeelDepthImageInfo.AspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    CTK_ITERATE(2) State->AttachmentImages.PeelDepth[IterationIndex] = vtk::create_image(Device, &PeelDepthImageInfo);
+
+    vtk::image_info PeelColorImageInfo = {};
+    PeelColorImageInfo.Width = Swapchain->Extent.width;
+    PeelColorImageInfo.Height = Swapchain->Extent.height;
+    PeelColorImageInfo.Format = Swapchain->ImageFormat;
+    PeelColorImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
+    PeelColorImageInfo.UsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    PeelColorImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    PeelColorImageInfo.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    State->AttachmentImages.PeelColor = vtk::create_image(Device, &PeelColorImageInfo);
+
+    ////////////////////////////////////////////////////////////
+    /// Render Pass
+    ////////////////////////////////////////////////////////////
+    vtk::render_pass_info RenderPassInfo = {};
+
+    // Attachments
+    static const struct {
+        u32 PeelDepth[2] = { 0, 1 };
+        u32 PeelColor = 2;
+        u32 SwapchainImage = 3;
+    } ATTACHMENT_INDEXES;
+
+    CTK_ITERATE(2) {
+        vtk::attachment *PeelDepthAttachment = ctk::push(&RenderPassInfo.Attachments);
+        PeelDepthAttachment->Description.format = PeelDepthImageInfo.Format;
+        PeelDepthAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
+        PeelDepthAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        PeelDepthAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        PeelDepthAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        PeelDepthAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        PeelDepthAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        PeelDepthAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        PeelDepthAttachment->ClearValue = { 1.0f, 0 };
+    }
+
+    vtk::attachment *PeelColorAttachment = ctk::push(&RenderPassInfo.Attachments);
+    PeelColorAttachment->Description.format = PeelColorImageInfo.Format;
+    PeelColorAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
+    PeelColorAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    PeelColorAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    PeelColorAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    PeelColorAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    PeelColorAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    PeelColorAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    PeelColorAttachment->ClearValue = { 0, 0, 0, 1 };
+
+    vtk::attachment *SwapchainImageAttachment = ctk::push(&RenderPassInfo.Attachments);
+    SwapchainImageAttachment->Description.format = Swapchain->ImageFormat;
+    SwapchainImageAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
+    SwapchainImageAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    SwapchainImageAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    SwapchainImageAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    SwapchainImageAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    SwapchainImageAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    SwapchainImageAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    SwapchainImageAttachment->ClearValue = { 0.04f, 0.04f, 0.04f, 1 };
+
+    // Subpasses
+    vtk::subpass *FirstPeelSubpass = ctk::push(&RenderPassInfo.Subpasses);
+    ctk::set(&FirstPeelSubpass->DepthAttachmentReference, { ATTACHMENT_INDEXES.PeelDepth[0], VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
+    ctk::push(&FirstPeelSubpass->ColorAttachmentReferences, { ATTACHMENT_INDEXES.PeelColor, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+
+    vtk::subpass *FirstBlendSubpass = ctk::push(&RenderPassInfo.Subpasses);
+    ctk::push(&FirstBlendSubpass->PreserveAttachmentIndexes, ATTACHMENT_INDEXES.PeelDepth[0]);
+    ctk::push(&FirstBlendSubpass->PreserveAttachmentIndexes, ATTACHMENT_INDEXES.PeelDepth[1]);
+    ctk::push(&FirstBlendSubpass->InputAttachmentReferences, { ATTACHMENT_INDEXES.PeelColor, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
+    ctk::push(&FirstBlendSubpass->ColorAttachmentReferences, { ATTACHMENT_INDEXES.SwapchainImage, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+
+    CTK_ITERATE(state::DEPTH_PEEL_LAYER_COUNT) {
+        vtk::subpass *PeelSubpass = ctk::push(&RenderPassInfo.Subpasses);
+        u32 InputDepthAttachmentIndex;
+        u32 OutputDepthAttachmentIndex;
+        if((IterationIndex % 2) == 0) {
+            InputDepthAttachmentIndex = 0;
+            OutputDepthAttachmentIndex = 1;
+        } else {
+            InputDepthAttachmentIndex = 1;
+            OutputDepthAttachmentIndex = 0;
+        }
+        ctk::push(&PeelSubpass->PreserveAttachmentIndexes, ATTACHMENT_INDEXES.SwapchainImage);
+        ctk::push(&PeelSubpass->InputAttachmentReferences, { ATTACHMENT_INDEXES.PeelDepth[InputDepthAttachmentIndex], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
+        ctk::set(&PeelSubpass->DepthAttachmentReference, { ATTACHMENT_INDEXES.PeelDepth[OutputDepthAttachmentIndex], VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
+        ctk::push(&PeelSubpass->ColorAttachmentReferences, { ATTACHMENT_INDEXES.PeelColor, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+
+        vtk::subpass *BlendSubpass = ctk::push(&RenderPassInfo.Subpasses);
+        ctk::push(&BlendSubpass->PreserveAttachmentIndexes, ATTACHMENT_INDEXES.PeelDepth[0]);
+        ctk::push(&BlendSubpass->PreserveAttachmentIndexes, ATTACHMENT_INDEXES.PeelDepth[1]);
+        ctk::push(&BlendSubpass->InputAttachmentReferences, { ATTACHMENT_INDEXES.PeelColor, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
+        ctk::push(&BlendSubpass->ColorAttachmentReferences, { ATTACHMENT_INDEXES.SwapchainImage, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+    }
+
+    // Subpass Dependencies
+    RenderPassInfo.SubpassDependencies.Count = 2 + (state::DEPTH_PEEL_LAYER_COUNT * 2);
+    RenderPassInfo.SubpassDependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    RenderPassInfo.SubpassDependencies[0].dstSubpass = 0;
+    RenderPassInfo.SubpassDependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    RenderPassInfo.SubpassDependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    RenderPassInfo.SubpassDependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    RenderPassInfo.SubpassDependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    RenderPassInfo.SubpassDependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    RenderPassInfo.SubpassDependencies[1].srcSubpass = 0;
+    RenderPassInfo.SubpassDependencies[1].dstSubpass = 1;
+    RenderPassInfo.SubpassDependencies[1].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    RenderPassInfo.SubpassDependencies[1].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    RenderPassInfo.SubpassDependencies[1].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    RenderPassInfo.SubpassDependencies[1].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    RenderPassInfo.SubpassDependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    CTK_ITERATE(state::DEPTH_PEEL_LAYER_COUNT) {
+        u32 DepthPeelLayerSubpassOffsetIndex = state::DEPTH_PEEL_LAYER_SUBPASS_BASE_INDEX + (IterationIndex * 2);
+        RenderPassInfo.SubpassDependencies[DepthPeelLayerSubpassOffsetIndex + 0].srcSubpass = DepthPeelLayerSubpassOffsetIndex - 1;
+        RenderPassInfo.SubpassDependencies[DepthPeelLayerSubpassOffsetIndex + 0].dstSubpass = DepthPeelLayerSubpassOffsetIndex + 0;
+        RenderPassInfo.SubpassDependencies[DepthPeelLayerSubpassOffsetIndex + 0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        RenderPassInfo.SubpassDependencies[DepthPeelLayerSubpassOffsetIndex + 0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        RenderPassInfo.SubpassDependencies[DepthPeelLayerSubpassOffsetIndex + 0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+        RenderPassInfo.SubpassDependencies[DepthPeelLayerSubpassOffsetIndex + 0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        RenderPassInfo.SubpassDependencies[DepthPeelLayerSubpassOffsetIndex + 0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+        RenderPassInfo.SubpassDependencies[DepthPeelLayerSubpassOffsetIndex + 1].srcSubpass = DepthPeelLayerSubpassOffsetIndex + 0;
+        RenderPassInfo.SubpassDependencies[DepthPeelLayerSubpassOffsetIndex + 1].dstSubpass = DepthPeelLayerSubpassOffsetIndex + 1;
+        RenderPassInfo.SubpassDependencies[DepthPeelLayerSubpassOffsetIndex + 1].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        RenderPassInfo.SubpassDependencies[DepthPeelLayerSubpassOffsetIndex + 1].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        RenderPassInfo.SubpassDependencies[DepthPeelLayerSubpassOffsetIndex + 1].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+        RenderPassInfo.SubpassDependencies[DepthPeelLayerSubpassOffsetIndex + 1].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        RenderPassInfo.SubpassDependencies[DepthPeelLayerSubpassOffsetIndex + 1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+    }
+
+    // Framebuffer Infos
+    CTK_ITERATE(Swapchain->Images.Count) {
+        vtk::framebuffer_info *FramebufferInfo = ctk::push(&RenderPassInfo.FramebufferInfos);
+        ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.PeelDepth[0].View);
+        ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.PeelDepth[1].View);
+        ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.PeelColor.View);
+        ctk::push(&FramebufferInfo->Attachments, Swapchain->Images[IterationIndex].View);
+        FramebufferInfo->Extent = Swapchain->Extent;
+        FramebufferInfo->Layers = 1;
+    }
+
+    State->RenderPass = vtk::create_render_pass(Device->Logical, VulkanInstance->GraphicsCommandPool, &RenderPassInfo);
+
+    ////////////////////////////////////////////////////////////
+    /// Descriptor Sets
+    ////////////////////////////////////////////////////////////
+    vtk::descriptor_set *EntityBufferDS = &State->DescriptorSets.EntityBuffer;
+    vtk::descriptor_set *PeelDepthImageDS = State->DescriptorSets.PeelDepthImage;
+    vtk::descriptor_set *PeelColorImageDS = &State->DescriptorSets.PeelColorImage;
+
+    // Pool
+    static const u32 PEEL_DEPTH_ATTACHMENT_COUNT = 2;
+    static const u32 PEEL_COLOR_ATTACHMENT_COUNT = 1;
+    ctk::sarray<VkDescriptorPoolSize, 4> DescriptorPoolSizes = {};
+    ctk::push(&DescriptorPoolSizes, { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, Swapchain->Images.Count });
+    ctk::push(&DescriptorPoolSizes, { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, PEEL_DEPTH_ATTACHMENT_COUNT + PEEL_COLOR_ATTACHMENT_COUNT });
+    VkDescriptorPoolCreateInfo DescriptorPoolCreateInfo = {};
+    DescriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    DescriptorPoolCreateInfo.flags = 0;
+    DescriptorPoolCreateInfo.maxSets = 16;
+    DescriptorPoolCreateInfo.poolSizeCount = DescriptorPoolSizes.Count;
+    DescriptorPoolCreateInfo.pPoolSizes = DescriptorPoolSizes.Data;
+    vtk::validate_vk_result(vkCreateDescriptorPool(Device->Logical, &DescriptorPoolCreateInfo, NULL, &State->DescriptorPool),
+                            "vkCreateDescriptorPool", "failed to create descriptor pool");
+
+    // EntityBuffer
+    {
+        // Layout
+        ctk::sarray<VkDescriptorSetLayoutBinding, 4> LayoutBindings = {};
+        ctk::push(&LayoutBindings, { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT });
+
+        VkDescriptorSetLayoutCreateInfo DescriptorSetLayoutCreateInfo = {};
+        DescriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        DescriptorSetLayoutCreateInfo.bindingCount = LayoutBindings.Count;
+        DescriptorSetLayoutCreateInfo.pBindings = LayoutBindings.Data;
+        vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &DescriptorSetLayoutCreateInfo, NULL,
+                                                            &State->DescriptorSetLayouts.EntityBuffer),
+                                "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
+
+        // Initialization
+        EntityBufferDS->Instances.Count = Swapchain->Images.Count;
+        ctk::push(&EntityBufferDS->DynamicOffsets, State->Scene->EntityBuffer.ElementSize);
+
+        // Allocation
+        ctk::sarray<VkDescriptorSetLayout, 4> DuplicateLayouts = {};
+        CTK_ITERATE(EntityBufferDS->Instances.Count) ctk::push(&DuplicateLayouts, State->DescriptorSetLayouts.EntityBuffer);
+
+        VkDescriptorSetAllocateInfo DescriptorSetAllocateInfo = {};
+        DescriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        DescriptorSetAllocateInfo.descriptorPool = State->DescriptorPool;
+        DescriptorSetAllocateInfo.descriptorSetCount = EntityBufferDS->Instances.Count;
+        DescriptorSetAllocateInfo.pSetLayouts = DuplicateLayouts.Data;
+        vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &DescriptorSetAllocateInfo, EntityBufferDS->Instances.Data),
+                                "vkAllocateDescriptorSets", "failed to allocate descriptor sets");
+    }
+
+    // PeelDepthImages
+    {
+        // Layouts
+        ctk::sarray<VkDescriptorSetLayoutBinding, 4> LayoutBindings = {};
+        ctk::push(&LayoutBindings, { 0, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_FRAGMENT_BIT });
+
+        VkDescriptorSetLayoutCreateInfo DescriptorSetLayoutCreateInfo = {};
+        DescriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        DescriptorSetLayoutCreateInfo.bindingCount = LayoutBindings.Count;
+        DescriptorSetLayoutCreateInfo.pBindings = LayoutBindings.Data;
+        vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &DescriptorSetLayoutCreateInfo, NULL,
+                                                            &State->DescriptorSetLayouts.PeelDepthImage),
+                                "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
+
+        CTK_ITERATE(2) {
+            // Initialization
+            PeelDepthImageDS[IterationIndex].Instances.Count = 1;
+
+            // Allocation
+            VkDescriptorSetAllocateInfo DescriptorSetAllocateInfo = {};
+            DescriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            DescriptorSetAllocateInfo.descriptorPool = State->DescriptorPool;
+            DescriptorSetAllocateInfo.descriptorSetCount = PeelDepthImageDS[IterationIndex].Instances.Count;
+            DescriptorSetAllocateInfo.pSetLayouts = &State->DescriptorSetLayouts.PeelDepthImage;
+            vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &DescriptorSetAllocateInfo,
+                                                             PeelDepthImageDS[IterationIndex].Instances.Data),
+                                    "vkAllocateDescriptorSets", "failed to allocate descriptor sets");
+        }
+    }
+
+    // PeelColorImage
+    {
+        // Layouts
+        ctk::sarray<VkDescriptorSetLayoutBinding, 4> LayoutBindings = {};
+        ctk::push(&LayoutBindings, { 0, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_FRAGMENT_BIT });
+
+        VkDescriptorSetLayoutCreateInfo DescriptorSetLayoutCreateInfo = {};
+        DescriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        DescriptorSetLayoutCreateInfo.bindingCount = LayoutBindings.Count;
+        DescriptorSetLayoutCreateInfo.pBindings = LayoutBindings.Data;
+        vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &DescriptorSetLayoutCreateInfo, NULL,
+                                                            &State->DescriptorSetLayouts.PeelColorImage),
+                                "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
+
+        // Initialization
+        PeelColorImageDS->Instances.Count = 1;
+
+        // Allocation
+        VkDescriptorSetAllocateInfo DescriptorSetAllocateInfo = {};
+        DescriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        DescriptorSetAllocateInfo.descriptorPool = State->DescriptorPool;
+        DescriptorSetAllocateInfo.descriptorSetCount = PeelColorImageDS->Instances.Count;
+        DescriptorSetAllocateInfo.pSetLayouts = &State->DescriptorSetLayouts.PeelColorImage;
+        vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &DescriptorSetAllocateInfo, PeelColorImageDS->Instances.Data),
+                                "vkAllocateDescriptorSets", "failed to allocate descriptor sets");
+    }
+
+    // Updates
+    ctk::sarray<VkDescriptorBufferInfo, 16> DescriptorBufferInfos = {};
+    ctk::sarray<VkDescriptorImageInfo, 16> DescriptorImageInfos = {};
+    ctk::sarray<VkWriteDescriptorSet, 16> WriteDescriptorSets = {};
+
+    // EntityBuffer
+    CTK_ITERATE(EntityBufferDS->Instances.Count) {
+        VkDescriptorSet DescriptorSet = EntityBufferDS->Instances[IterationIndex];
+        vtk::region *EntityBufferRegion = State->Scene->EntityBuffer.Regions + IterationIndex;
+
+        VkDescriptorBufferInfo *EntityDescriptorBufferInfo = ctk::push(&DescriptorBufferInfos);
+        EntityDescriptorBufferInfo->buffer = EntityBufferRegion->Buffer->Handle;
+        EntityDescriptorBufferInfo->offset = EntityBufferRegion->Offset;
+        EntityDescriptorBufferInfo->range = EntityBufferRegion->Size;
+
+        VkWriteDescriptorSet *EntityBufferWrite = ctk::push(&WriteDescriptorSets);
+        EntityBufferWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        EntityBufferWrite->dstSet = DescriptorSet;
+        EntityBufferWrite->dstBinding = 0;
+        EntityBufferWrite->dstArrayElement = 0;
+        EntityBufferWrite->descriptorCount = 1;
+        EntityBufferWrite->descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        EntityBufferWrite->pBufferInfo = EntityDescriptorBufferInfo;
+    }
+
+    // PeelDepthImages
+    CTK_ITERATE(2) {
+        VkDescriptorImageInfo *PeelDepthDescriptorImageInfo = ctk::push(&DescriptorImageInfos);
+        PeelDepthDescriptorImageInfo->sampler = VK_NULL_HANDLE;
+        PeelDepthDescriptorImageInfo->imageView = State->AttachmentImages.PeelDepth[IterationIndex].View;
+        PeelDepthDescriptorImageInfo->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkWriteDescriptorSet *PeelDepthImageWrite = ctk::push(&WriteDescriptorSets);
+        PeelDepthImageWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        PeelDepthImageWrite->dstSet = PeelDepthImageDS[IterationIndex].Instances[0];
+        PeelDepthImageWrite->dstBinding = 0;
+        PeelDepthImageWrite->dstArrayElement = 0;
+        PeelDepthImageWrite->descriptorCount = 1;
+        PeelDepthImageWrite->descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+        PeelDepthImageWrite->pImageInfo = PeelDepthDescriptorImageInfo;
+    }
+
+    // PeelColorImage
+    VkDescriptorImageInfo *PeelColorDescriptorImageInfo = ctk::push(&DescriptorImageInfos);
+    PeelColorDescriptorImageInfo->sampler = VK_NULL_HANDLE;
+    PeelColorDescriptorImageInfo->imageView = State->AttachmentImages.PeelColor.View;
+    PeelColorDescriptorImageInfo->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet *PeelColorImageWrite = ctk::push(&WriteDescriptorSets);
+    PeelColorImageWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    PeelColorImageWrite->dstSet = PeelColorImageDS->Instances[0];
+    PeelColorImageWrite->dstBinding = 0;
+    PeelColorImageWrite->dstArrayElement = 0;
+    PeelColorImageWrite->descriptorCount = 1;
+    PeelColorImageWrite->descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+    PeelColorImageWrite->pImageInfo = PeelColorDescriptorImageInfo;
+
+    vkUpdateDescriptorSets(Device->Logical, WriteDescriptorSets.Count, WriteDescriptorSets.Data, 0, NULL);
+
+    ////////////////////////////////////////////////////////////
     /// Graphics Pipelines
     ////////////////////////////////////////////////////////////
 
-    // Blend GP
+    // Info
+    vtk::graphics_pipeline_info FirstPeelGPInfo = vtk::default_graphics_pipeline_info();
+    ctk::push(&FirstPeelGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "depth_peeling_first_peel_vert"));
+    ctk::push(&FirstPeelGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "depth_peeling_first_peel_frag"));
+    ctk::push(&FirstPeelGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.EntityBuffer);
+    ctk::push(&FirstPeelGPInfo.VertexInputs, { 0, 0, State->VertexAttributeIndexes.Position });
+    FirstPeelGPInfo.VertexLayout = &State->VertexLayout;
+    ctk::push(&FirstPeelGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
+    ctk::push(&FirstPeelGPInfo.Scissors, { 0, 0, Swapchain->Extent.width, Swapchain->Extent.height });
+    ctk::push(&FirstPeelGPInfo.ColorBlendAttachmentStates, vtk::default_color_blend_attachment_state());
+    // ctk::push(&FirstPeelGPInfo.ColorBlendAttachmentStates, {
+    //     VK_TRUE,
+    //     VK_BLEND_FACTOR_SRC_ALPHA,
+    //     VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+    //     VK_BLEND_OP_ADD,
+    //     VK_BLEND_FACTOR_ONE,
+    //     VK_BLEND_FACTOR_ZERO,
+    //     VK_BLEND_OP_ADD,
+    //     VTK_COLOR_COMPONENT_RGBA,
+    // });
+    FirstPeelGPInfo.DepthStencilState.depthTestEnable = VK_TRUE;
+    FirstPeelGPInfo.DepthStencilState.depthWriteEnable = VK_TRUE;
+    FirstPeelGPInfo.DepthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
     vtk::graphics_pipeline_info BlendGPInfo = vtk::default_graphics_pipeline_info();
     ctk::push(&BlendGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "depth_peeling_blend_vert"));
     ctk::push(&BlendGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "depth_peeling_blend_frag"));
-    ctk::push(&BlendGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.EntityUniformBuffer);
+    ctk::push(&BlendGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.PeelColorImage);
     ctk::push(&BlendGPInfo.VertexInputs, { 0, 0, State->VertexAttributeIndexes.Position });
     BlendGPInfo.VertexLayout = &State->VertexLayout;
     ctk::push(&BlendGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
     ctk::push(&BlendGPInfo.Scissors, { 0, 0, Swapchain->Extent.width, Swapchain->Extent.height });
     ctk::push(&BlendGPInfo.ColorBlendAttachmentStates, {
         VK_TRUE,
-#if 1
-        VK_BLEND_FACTOR_SRC_ALPHA,
-        VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-        VK_BLEND_OP_ADD,
-        VK_BLEND_FACTOR_ONE,
-        VK_BLEND_FACTOR_ZERO,
-        VK_BLEND_OP_ADD,
-#else
-        // Underblend
         VK_BLEND_FACTOR_DST_ALPHA,
         VK_BLEND_FACTOR_ONE,
         VK_BLEND_OP_ADD,
         VK_BLEND_FACTOR_ZERO,
         VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
         VK_BLEND_OP_ADD,
-#endif
         VTK_COLOR_COMPONENT_RGBA,
     });
-    BlendGPInfo.DepthStencilState.depthTestEnable = VK_TRUE;
-    BlendGPInfo.DepthStencilState.depthWriteEnable = VK_TRUE;
-    BlendGPInfo.DepthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-    BlendGPInfo.Subpass = 0;
-    // BlendGPInfo.RasterizationState.cullMode = VK_CULL_MODE_NONE;
-    State->GraphicsPipelines.Blend = vtk::create_graphics_pipeline(Device->Logical, &State->RenderPass, &BlendGPInfo);
+
+    vtk::graphics_pipeline_info PeelGPInfo = vtk::default_graphics_pipeline_info();
+    ctk::push(&PeelGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "depth_peeling_peel_vert"));
+    ctk::push(&PeelGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "depth_peeling_peel_frag"));
+    ctk::push(&PeelGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.EntityBuffer);
+    ctk::push(&PeelGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.PeelDepthImage);
+    ctk::push(&PeelGPInfo.VertexInputs, { 0, 0, State->VertexAttributeIndexes.Position });
+    PeelGPInfo.VertexLayout = &State->VertexLayout;
+    ctk::push(&PeelGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
+    ctk::push(&PeelGPInfo.Scissors, { 0, 0, Swapchain->Extent.width, Swapchain->Extent.height });
+    ctk::push(&PeelGPInfo.ColorBlendAttachmentStates, vtk::default_color_blend_attachment_state());
+    PeelGPInfo.DepthStencilState.depthTestEnable = VK_TRUE;
+    PeelGPInfo.DepthStencilState.depthWriteEnable = VK_TRUE;
+    PeelGPInfo.DepthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+    // Creation
+    State->GraphicsPipelines.FirstPeel = vtk::create_graphics_pipeline(Device->Logical, &State->RenderPass, 0, &FirstPeelGPInfo);
+    State->GraphicsPipelines.FirstBlend = vtk::create_graphics_pipeline(Device->Logical, &State->RenderPass, 1, &BlendGPInfo);
+    CTK_ITERATE(state::DEPTH_PEEL_LAYER_COUNT) {
+        u32 DepthPeelLayerSubpassOffsetIndex = state::DEPTH_PEEL_LAYER_SUBPASS_BASE_INDEX + (IterationIndex * 2);
+        State->GraphicsPipelines.Peel[IterationIndex] =
+            vtk::create_graphics_pipeline(Device->Logical, &State->RenderPass, DepthPeelLayerSubpassOffsetIndex + 0, &PeelGPInfo);
+        State->GraphicsPipelines.Blend[IterationIndex] =
+            vtk::create_graphics_pipeline(Device->Logical, &State->RenderPass, DepthPeelLayerSubpassOffsetIndex + 1, &BlendGPInfo);
+    }
 }
 
 static void create_entities(state *State, vulkan_instance *VulkanInstance, assets *Assets) {
-    CTK_REPEAT(4) {
+    for(s32 Z = 0; Z < 8; ++Z)
+    for(s32 Y = 0; Y < 1; ++Y)
+    for(s32 X = 0; X < 8; ++X) {
         char Name[16] = {};
-        sprintf(Name, "cube_%u", RepeatIndex);
+        sprintf(Name, "cube_%u", ((Y * 8 * 8) + (Z * 8)) + X);
         entity *Cube = push_entity(State->Scene, Name);
-        Cube->Transform.Position = { 0, 0, 1.5f * RepeatIndex };
+        Cube->Transform.Position = { 1.5f * X, 1.5f * (-Y), 1.5f * Z };
         Cube->Transform.Scale = { 1, 1, 1 };
         Cube->Mesh = ctk::at(&Assets->Meshes, "cube");
     }
@@ -299,25 +494,126 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
         RenderPassBeginInfo.pClearValues = RenderPass->ClearValues.Data;
 
         vkCmdBeginRenderPass(CommandBuffer, &RenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE); {
-            vtk::graphics_pipeline *BlendGP = &State->GraphicsPipelines.Blend;
-            vtk::descriptor_set *DescriptorSets[] { &State->DescriptorSets.EntityUniformBuffer };
-            for(u32 EntityIndex = 0; EntityIndex < State->Scene->Entities.Count; ++EntityIndex) {
-                entity *Entity = State->Scene->Entities.Values + EntityIndex;
-                mesh *Mesh = Entity->Mesh;
+            // First Peel Stage
+            {
+                vtk::graphics_pipeline *FirstPeelGP = &State->GraphicsPipelines.FirstPeel;
+                vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.EntityBuffer };
+                for(u32 EntityIndex = 0; EntityIndex < State->Scene->Entities.Count; ++EntityIndex) {
+                    mesh *Mesh = State->Scene->Entities.Values[EntityIndex].Mesh;
+
+                    // Graphics Pipeline
+                    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, FirstPeelGP->Handle);
+
+                    // Bind Descriptor Sets
+                    vtk::bind_descriptor_sets(CommandBuffer, FirstPeelGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
+                                              SwapchainImageIndex, EntityIndex);
+
+                    // Vertex/Index Buffers
+                    vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh->VertexRegion.Buffer->Handle, &Mesh->VertexRegion.Offset);
+                    vkCmdBindIndexBuffer(CommandBuffer, Mesh->IndexRegion.Buffer->Handle, Mesh->IndexRegion.Offset, VK_INDEX_TYPE_UINT32);
+
+                    // Draw
+                    vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
+                }
+            }
+
+            // First Blend Stage
+            {
+                vtk::graphics_pipeline *FirstBlendGP = &State->GraphicsPipelines.FirstBlend;
+                vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.PeelColorImage };
+                mesh *FullscreenPlane = ctk::at(&Assets->Meshes, "fullscreen_plane");
+
+                // Increment Subpass
+                vkCmdNextSubpass(CommandBuffer, VK_SUBPASS_CONTENTS_INLINE);
 
                 // Graphics Pipeline
-                vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, BlendGP->Handle);
+                vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, FirstBlendGP->Handle);
 
-                // Descriptor Sets
-                vtk::bind_descriptor_sets(CommandBuffer, BlendGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
-                                          SwapchainImageIndex, EntityIndex);
+                // Bind Descriptor Sets
+                vtk::bind_descriptor_sets(CommandBuffer, FirstBlendGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets));
 
                 // Vertex/Index Buffers
-                vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh->VertexRegion.Buffer->Handle, &Mesh->VertexRegion.Offset);
-                vkCmdBindIndexBuffer(CommandBuffer, Mesh->IndexRegion.Buffer->Handle, Mesh->IndexRegion.Offset, VK_INDEX_TYPE_UINT32);
+                vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &FullscreenPlane->VertexRegion.Buffer->Handle, &FullscreenPlane->VertexRegion.Offset);
+                vkCmdBindIndexBuffer(CommandBuffer, FullscreenPlane->IndexRegion.Buffer->Handle, FullscreenPlane->IndexRegion.Offset,
+                                     VK_INDEX_TYPE_UINT32);
 
                 // Draw
-                vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
+                vkCmdDrawIndexed(CommandBuffer, FullscreenPlane->Indexes.Count, 1, 0, 0, 0);
+            }
+
+            CTK_ITERATE(state::DEPTH_PEEL_LAYER_COUNT) {
+                // Peel Stage
+                {
+                    vtk::graphics_pipeline *PeelGP = State->GraphicsPipelines.Peel + IterationIndex;
+                    vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.EntityBuffer };
+
+                    // Increment Subpass
+                    vkCmdNextSubpass(CommandBuffer, VK_SUBPASS_CONTENTS_INLINE);
+
+                    // Clear attachments before rendering.
+                    VkClearAttachment AttachmentClears[2] = {};
+                    AttachmentClears[0].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                    AttachmentClears[0].clearValue = { 0.0f, 0.0f, 0.0f, 0.0f };
+                    AttachmentClears[0].colorAttachment = 0;
+                    AttachmentClears[1].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                    AttachmentClears[1].clearValue.depthStencil.depth = 1.0f;
+                    AttachmentClears[1].clearValue.depthStencil.stencil = 0;
+                    VkClearRect AttachmentClearRect = {};
+                    AttachmentClearRect.baseArrayLayer = 0;
+                    AttachmentClearRect.layerCount = 1;
+                    AttachmentClearRect.rect.extent = Swapchain->Extent;
+                    AttachmentClearRect.rect.offset = { 0, 0 };
+                    vkCmdClearAttachments(CommandBuffer, 2, AttachmentClears, 1, &AttachmentClearRect);
+
+                    // Bind peel depth image input attachment descriptor set.
+                    u32 InputAttachmentDescriptorSetIndex = (IterationIndex % 2) == 0 ? 0 : 1;
+                    vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PeelGP->Layout,
+                                            1, 1, State->DescriptorSets.PeelDepthImage[InputAttachmentDescriptorSetIndex].Instances + 0,
+                                            0, NULL);
+
+                    for(u32 EntityIndex = 0; EntityIndex < State->Scene->Entities.Count; ++EntityIndex) {
+                        mesh *Mesh = State->Scene->Entities.Values[EntityIndex].Mesh;
+
+                        // Graphics Pipeline
+                        vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PeelGP->Handle);
+
+                        // Bind Descriptor Sets
+                        vtk::bind_descriptor_sets(CommandBuffer, PeelGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
+                                                  SwapchainImageIndex, EntityIndex);
+
+                        // Vertex/Index Buffers
+                        vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh->VertexRegion.Buffer->Handle, &Mesh->VertexRegion.Offset);
+                        vkCmdBindIndexBuffer(CommandBuffer, Mesh->IndexRegion.Buffer->Handle, Mesh->IndexRegion.Offset, VK_INDEX_TYPE_UINT32);
+
+                        // Draw
+                        vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
+                    }
+                }
+
+
+                // Blend Stage
+                {
+                    vtk::graphics_pipeline *BlendGP = State->GraphicsPipelines.Blend + IterationIndex;
+                    vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.PeelColorImage };
+                    mesh *FullscreenPlane = ctk::at(&Assets->Meshes, "fullscreen_plane");
+
+                    // Increment Subpass
+                    vkCmdNextSubpass(CommandBuffer, VK_SUBPASS_CONTENTS_INLINE);
+
+                    // Graphics Pipeline
+                    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, BlendGP->Handle);
+
+                    // Bind Descriptor Sets
+                    vtk::bind_descriptor_sets(CommandBuffer, BlendGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets));
+
+                    // Vertex/Index Buffers
+                    vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &FullscreenPlane->VertexRegion.Buffer->Handle, &FullscreenPlane->VertexRegion.Offset);
+                    vkCmdBindIndexBuffer(CommandBuffer, FullscreenPlane->IndexRegion.Buffer->Handle, FullscreenPlane->IndexRegion.Offset,
+                                         VK_INDEX_TYPE_UINT32);
+
+                    // Draw
+                    vkCmdDrawIndexed(CommandBuffer, FullscreenPlane->Indexes.Count, 1, 0, 0, 0);
+                }
             }
         } vkCmdEndRenderPass(CommandBuffer);
         vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");

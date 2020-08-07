@@ -107,7 +107,7 @@ struct scene
     camera Camera;
     ctk::smap<entity, MAX_ENTITIES> Entities;
     ctk::sarray<entity_ubo, MAX_ENTITIES> EntityUBOs;
-    vtk::uniform_buffer EntityUniformBuffer;
+    vtk::uniform_buffer EntityBuffer;
 };
 
 ////////////////////////////////////////////////////////////
@@ -436,7 +436,7 @@ create_scene(assets *Assets, vulkan_instance *VulkanInstance, cstr Path = NULL)
     scene *Scene = ctk::allocate<scene>();
     *Scene = {};
     Scene->Camera.FieldOfView = 90;
-    Scene->EntityUniformBuffer = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, scene::MAX_ENTITIES, sizeof(entity_ubo),
+    Scene->EntityBuffer = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, scene::MAX_ENTITIES, sizeof(entity_ubo),
                                                             VulkanInstance->Swapchain.Images.Count);
     if(Path)
     {
@@ -571,8 +571,7 @@ update_entity_uniform_buffer(vulkan_instance *VulkanInstance, scene *Scene, u32 
     }
 
     // Write all entity ubos to current frame's entity uniform buffer region.
-    vtk::region *EntityUniformBufferRegion = Scene->EntityUniformBuffer.Regions + SwapchainImageIndex;
-    vtk::write_to_host_region(VulkanInstance->Device.Logical, EntityUniformBufferRegion,
+    vtk::write_to_host_region(VulkanInstance->Device.Logical, Scene->EntityBuffer.Regions + SwapchainImageIndex,
                               Scene->EntityUBOs.Data, ctk::byte_count(&Scene->EntityUBOs), 0);
 }
 

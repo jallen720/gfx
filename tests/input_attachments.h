@@ -40,7 +40,7 @@ input_attachments_test_create_state(vulkan_instance *VulkanInstance, assets *Ass
     ColorImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     ColorImageInfo.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
-    CTK_REPEAT(Swapchain->Images.Count)
+    CTK_ITERATE(Swapchain->Images.Count)
     {
         ctk::push(&InputAttachmentsTest.DepthImages, vtk::create_image(Device, &DepthImageInfo));
         ctk::push(&InputAttachmentsTest.ColorImages, vtk::create_image(Device, &ColorImageInfo));
@@ -126,12 +126,12 @@ input_attachments_test_create_state(vulkan_instance *VulkanInstance, assets *Ass
     TestRenderPassInfo.SubpassDependencies[2].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
     // Framebuffer Infos
-    CTK_REPEAT(Swapchain->Images.Count)
+    CTK_ITERATE(Swapchain->Images.Count)
     {
         vtk::framebuffer_info *FramebufferInfo = ctk::push(&TestRenderPassInfo.FramebufferInfos);
-        ctk::push(&FramebufferInfo->Attachments, InputAttachmentsTest.DepthImages[RepeatIndex].View);
-        ctk::push(&FramebufferInfo->Attachments, InputAttachmentsTest.ColorImages[RepeatIndex].View);
-        ctk::push(&FramebufferInfo->Attachments, Swapchain->Images[RepeatIndex].View);
+        ctk::push(&FramebufferInfo->Attachments, InputAttachmentsTest.DepthImages[IterationIndex].View);
+        ctk::push(&FramebufferInfo->Attachments, InputAttachmentsTest.ColorImages[IterationIndex].View);
+        ctk::push(&FramebufferInfo->Attachments, Swapchain->Images[IterationIndex].View);
         FramebufferInfo->Extent = Swapchain->Extent;
         FramebufferInfo->Layers = 1;
     }
@@ -172,7 +172,7 @@ input_attachments_test_create_state(vulkan_instance *VulkanInstance, assets *Ass
     // Allocation
     InputAttachmentsTest.PresentDescriptorSets.Count = Swapchain->Images.Count;
     ctk::sarray<VkDescriptorSetLayout, 4> DuplicateLayouts = {};
-    CTK_REPEAT(Swapchain->Images.Count)
+    CTK_ITERATE(Swapchain->Images.Count)
     {
         ctk::push(&DuplicateLayouts, InputAttachmentsTest.PresentDescriptorSetLayout);
     }
@@ -189,11 +189,11 @@ input_attachments_test_create_state(vulkan_instance *VulkanInstance, assets *Ass
     // Updates
     ctk::sarray<VkDescriptorImageInfo, 16> DescriptorImageInfos = {};
     ctk::sarray<VkWriteDescriptorSet, 16> WriteDescriptorSets = {};
-    CTK_REPEAT(Swapchain->Images.Count)
+    CTK_ITERATE(Swapchain->Images.Count)
     {
-        vtk::image *DepthImage = InputAttachmentsTest.DepthImages + RepeatIndex;
-        vtk::image *ColorImage = InputAttachmentsTest.ColorImages + RepeatIndex;
-        VkDescriptorSet PresentDescriptorSet = InputAttachmentsTest.PresentDescriptorSets[RepeatIndex];
+        vtk::image *DepthImage = InputAttachmentsTest.DepthImages + IterationIndex;
+        vtk::image *ColorImage = InputAttachmentsTest.ColorImages + IterationIndex;
+        VkDescriptorSet PresentDescriptorSet = InputAttachmentsTest.PresentDescriptorSets[IterationIndex];
 
         VkWriteDescriptorSet *DepthWriteDescriptorSet = ctk::push(&WriteDescriptorSets);
         DepthWriteDescriptorSet->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -302,12 +302,12 @@ static scene *
 input_attachments_test_create_scene(assets *Assets, vulkan_state *VulkanState)
 {
     scene *Scene = create_scene(Assets, VulkanState, "assets/scenes/empty.ctkd");
-    CTK_REPEAT(4)
+    CTK_ITERATE(4)
     {
         char Name[16] = {};
-        sprintf(Name, "cube_%u", RepeatIndex);
+        sprintf(Name, "cube_%u", IterationIndex);
         entity *Cube = push_entity(Scene, Name);
-        Cube->Transform.Position = { 0, 0, 1.5f * RepeatIndex };
+        Cube->Transform.Position = { 0, 0, 1.5f * IterationIndex };
         Cube->Transform.Scale = { 1, 1, 1 };
         ctk::push(&Cube->DescriptorSets, ctk::at(&VulkanState->DescriptorSets, "entity"));
         Cube->GraphicsPipeline = ctk::at(&VulkanState->GraphicsPipelines, "blended");
@@ -373,7 +373,6 @@ input_attachments_test_init(vulkan_instance *VulkanInstance, assets *Assets, vul
 
             // Second subpass, reads framebuffer color & depth attachments written to in first pass and renders to present attachment.
             vtk::graphics_pipeline *PresentGP = ctk::at(&VulkanState->GraphicsPipelines, "present");
-            mesh *FullscreenPlane = ctk::at(&Assets->Meshes, "fullscreen_plane");
             vkCmdNextSubpass(CommandBuffer, VK_SUBPASS_CONTENTS_INLINE);
             vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PresentGP->Handle);
             vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PresentGP->Layout,
