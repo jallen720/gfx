@@ -3,7 +3,7 @@
 #include "gfx/tests/shared.h"
 
 struct state {
-    static const u32 DEPTH_PEEL_LAYER_COUNT = 5;
+    static const u32 DEPTH_PEEL_LAYER_COUNT = 24;
     static const u32 DEPTH_PEEL_LAYER_SUBPASS_BASE_INDEX = 2;
     scene *Scene;
     vtk::render_pass RenderPass;
@@ -104,7 +104,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     PeelColorAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     PeelColorAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     PeelColorAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    PeelColorAttachment->ClearValue = { 0, 0, 0, 1 };
+    PeelColorAttachment->ClearValue = { 0, 0, 0, 0 };
 
     vtk::attachment *SwapchainImageAttachment = ctk::push(&RenderPassInfo.Attachments);
     SwapchainImageAttachment->Description.format = Swapchain->ImageFormat;
@@ -115,7 +115,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     SwapchainImageAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     SwapchainImageAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     SwapchainImageAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    SwapchainImageAttachment->ClearValue = { 0.04f, 0.04f, 0.04f, 1 };
+    SwapchainImageAttachment->ClearValue = { 0, 0, 0, 1 };
 
     // Subpasses
     vtk::subpass *FirstPeelSubpass = ctk::push(&RenderPassInfo.Subpasses);
@@ -493,7 +493,7 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
         RenderPassBeginInfo.clearValueCount = RenderPass->ClearValues.Count;
         RenderPassBeginInfo.pClearValues = RenderPass->ClearValues.Data;
 
-        vkCmdBeginRenderPass(CommandBuffer, &RenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE); {
+        vkCmdBeginRenderPass(CommandBuffer, &RenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
             // First Peel Stage
             {
                 vtk::graphics_pipeline *FirstPeelGP = &State->GraphicsPipelines.FirstPeel;
@@ -590,7 +590,6 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
                     }
                 }
 
-
                 // Blend Stage
                 {
                     vtk::graphics_pipeline *BlendGP = State->GraphicsPipelines.Blend + IterationIndex;
@@ -615,7 +614,7 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
                     vkCmdDrawIndexed(CommandBuffer, FullscreenPlane->Indexes.Count, 1, 0, 0, 0);
                 }
             }
-        } vkCmdEndRenderPass(CommandBuffer);
+        vkCmdEndRenderPass(CommandBuffer);
         vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
     }
 }
