@@ -76,17 +76,17 @@ struct assets
     ctk::smap<vtk::shader_module, 32> ShaderModules;
 };
 
-struct entity_ubo
-{
-    alignas(16) glm::mat4 ModelMatrix;
-    alignas(16) glm::mat4 ModelViewProjectionMatrix;
-};
-
 struct transform
 {
     ctk::vec3<f32> Position;
     ctk::vec3<f32> Rotation;
     ctk::vec3<f32> Scale;
+};
+
+struct entity_ubo
+{
+    alignas(16) glm::mat4 ModelMatrix;
+    alignas(16) glm::mat4 ModelViewProjectionMatrix;
 };
 
 struct entity
@@ -437,7 +437,7 @@ create_scene(assets *Assets, vulkan_instance *VulkanInstance, cstr Path = NULL)
     *Scene = {};
     Scene->Camera.FieldOfView = 90;
     Scene->EntityBuffer = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, scene::MAX_ENTITIES, sizeof(entity_ubo),
-                                                            VulkanInstance->Swapchain.Images.Count);
+                                                     VulkanInstance->Swapchain.Images.Count);
     if(Path)
     {
         ctk::data SceneData = ctk::load_data(Path);
@@ -536,10 +536,6 @@ update_entity_uniform_buffer(vulkan_instance *VulkanInstance, scene *Scene, u32 
     if(Scene->Entities.Count == 0) return;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
     transform *CameraTransform = &Scene->Camera.Transform;
-
-    ////////////////////////////////////////////////////////////
-    /// Entity UBOs
-    ////////////////////////////////////////////////////////////
 
     // View Matrix
     glm::vec3 CameraPosition = { CameraTransform->Position.X, CameraTransform->Position.Y, CameraTransform->Position.Z };
