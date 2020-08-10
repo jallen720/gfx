@@ -149,6 +149,14 @@
   <ItemGroup>
     <ClCompile Include="main.cc" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="tests\default.h" />
+    <ClInclude Include="tests\depth_peeling.h" />
+    <ClInclude Include="tests\input_attachments.h" />
+    <ClInclude Include="tests\lighting.h" />
+    <ClInclude Include="tests\shared.h" />
+    <ClInclude Include="tests\stencil.h" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

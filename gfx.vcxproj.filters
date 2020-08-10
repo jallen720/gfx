@@ -15,4 +15,24 @@
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="tests\default.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="tests\depth_peeling.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="tests\input_attachments.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="tests\lighting.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="tests\shared.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="tests\stencil.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+  </ItemGroup>
 </Project>

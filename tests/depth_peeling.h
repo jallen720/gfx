@@ -5,7 +5,8 @@
 struct state {
     static const u32 DEPTH_PEEL_LAYER_COUNT = 24;
     static const u32 DEPTH_PEEL_LAYER_SUBPASS_BASE_INDEX = 2;
-    scene *Scene;
+    scene Scene;
+    vtk::uniform_buffer EntityBuffer;
     vtk::render_pass RenderPass;
     VkDescriptorPool DescriptorPool;
     vtk::vertex_layout VertexLayout;
@@ -39,6 +40,12 @@ struct state {
 static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, assets *Assets) {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+
+    ////////////////////////////////////////////////////////////
+    /// Buffers
+    ////////////////////////////////////////////////////////////
+    State->EntityBuffer = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, scene::MAX_ENTITIES, sizeof(entity_ubo),
+                                                     VulkanInstance->Swapchain.Images.Count);
 
     ////////////////////////////////////////////////////////////
     /// Vertex Layout
@@ -239,7 +246,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
 
         // Initialization
         EntityBufferDS->Instances.Count = Swapchain->Images.Count;
-        ctk::push(&EntityBufferDS->DynamicOffsets, State->Scene->EntityBuffer.ElementSize);
+        ctk::push(&EntityBufferDS->DynamicOffsets, State->EntityBuffer.ElementSize);
 
         // Allocation
         ctk::sarray<VkDescriptorSetLayout, 4> DuplicateLayouts = {};
@@ -319,7 +326,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     // EntityBuffer
     CTK_ITERATE(EntityBufferDS->Instances.Count) {
         VkDescriptorSet DescriptorSet = EntityBufferDS->Instances[IterationIndex];
-        vtk::region *EntityBufferRegion = State->Scene->EntityBuffer.Regions + IterationIndex;
+        vtk::region *EntityBufferRegion = State->EntityBuffer.Regions + IterationIndex;
 
         VkDescriptorBufferInfo *EntityDescriptorBufferInfo = ctk::push(&DescriptorBufferInfos);
         EntityDescriptorBufferInfo->buffer = EntityBufferRegion->Buffer->Handle;
@@ -443,25 +450,36 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     }
 }
 
-static void create_entities(state *State, vulkan_instance *VulkanInstance, assets *Assets) {
+static void create_scene(state *State, assets *Assets, vulkan_instance *VulkanInstance) {
+    scene *Scene = &State->Scene;
+    ctk::data SceneData = ctk::load_data("assets/scenes/empty.ctkd");
+
+    // Camera
+    ctk::data *CameraData = ctk::at(&SceneData, "camera");
+    Scene->Camera.Transform = load_transform(ctk::at(CameraData, "transform"));
+    Scene->Camera.FieldOfView = ctk::to_f32(CameraData, "field_of_view");
+
+    // Create Entities
     for(s32 Z = 0; Z < 8; ++Z)
     for(s32 Y = 0; Y < 1; ++Y)
     for(s32 X = 0; X < 8; ++X) {
         char Name[16] = {};
         sprintf(Name, "cube_%u", ((Y * 8 * 8) + (Z * 8)) + X);
-        entity *Cube = push_entity(State->Scene, Name);
+        entity *Cube = push_entity(Scene, Name);
         Cube->Transform.Position = { 1.5f * X, 1.5f * (-Y), 1.5f * Z };
         Cube->Transform.Scale = { 1, 1, 1 };
         Cube->Mesh = ctk::at(&Assets->Meshes, "cube");
     }
+
+    // Cleanup
+    ctk::_free(&SceneData);
 }
 
 static state *create_state(vulkan_instance *VulkanInstance, assets *Assets) {
     auto State = ctk::allocate<state>();
     *State = {};
-    State->Scene = create_scene(Assets, VulkanInstance, "assets/scenes/empty.ctkd");
-    create_entities(State, VulkanInstance, Assets);
     create_vulkan_state(State, VulkanInstance, Assets);
+    create_scene(State, Assets, VulkanInstance);
     return State;
 }
 
@@ -498,8 +516,8 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
             {
                 vtk::graphics_pipeline *FirstPeelGP = &State->GraphicsPipelines.FirstPeel;
                 vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.EntityBuffer };
-                for(u32 EntityIndex = 0; EntityIndex < State->Scene->Entities.Count; ++EntityIndex) {
-                    mesh *Mesh = State->Scene->Entities.Values[EntityIndex].Mesh;
+                for(u32 EntityIndex = 0; EntityIndex < State->Scene.Entities.Count; ++EntityIndex) {
+                    mesh *Mesh = State->Scene.Entities.Values[EntityIndex].Mesh;
 
                     // Graphics Pipeline
                     vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, FirstPeelGP->Handle);
@@ -533,7 +551,8 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
                 vtk::bind_descriptor_sets(CommandBuffer, FirstBlendGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets));
 
                 // Vertex/Index Buffers
-                vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &FullscreenPlane->VertexRegion.Buffer->Handle, &FullscreenPlane->VertexRegion.Offset);
+                vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &FullscreenPlane->VertexRegion.Buffer->Handle,
+                                       &FullscreenPlane->VertexRegion.Offset);
                 vkCmdBindIndexBuffer(CommandBuffer, FullscreenPlane->IndexRegion.Buffer->Handle, FullscreenPlane->IndexRegion.Offset,
                                      VK_INDEX_TYPE_UINT32);
 
@@ -571,8 +590,8 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
                                             1, 1, State->DescriptorSets.PeelDepthImage[InputAttachmentDescriptorSetIndex].Instances + 0,
                                             0, NULL);
 
-                    for(u32 EntityIndex = 0; EntityIndex < State->Scene->Entities.Count; ++EntityIndex) {
-                        mesh *Mesh = State->Scene->Entities.Values[EntityIndex].Mesh;
+                    for(u32 EntityIndex = 0; EntityIndex < State->Scene.Entities.Count; ++EntityIndex) {
+                        mesh *Mesh = State->Scene.Entities.Values[EntityIndex].Mesh;
 
                         // Graphics Pipeline
                         vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PeelGP->Handle);
@@ -583,7 +602,8 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
 
                         // Vertex/Index Buffers
                         vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh->VertexRegion.Buffer->Handle, &Mesh->VertexRegion.Offset);
-                        vkCmdBindIndexBuffer(CommandBuffer, Mesh->IndexRegion.Buffer->Handle, Mesh->IndexRegion.Offset, VK_INDEX_TYPE_UINT32);
+                        vkCmdBindIndexBuffer(CommandBuffer, Mesh->IndexRegion.Buffer->Handle, Mesh->IndexRegion.Offset,
+                                             VK_INDEX_TYPE_UINT32);
 
                         // Draw
                         vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
@@ -606,7 +626,8 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
                     vtk::bind_descriptor_sets(CommandBuffer, BlendGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets));
 
                     // Vertex/Index Buffers
-                    vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &FullscreenPlane->VertexRegion.Buffer->Handle, &FullscreenPlane->VertexRegion.Offset);
+                    vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &FullscreenPlane->VertexRegion.Buffer->Handle,
+                                           &FullscreenPlane->VertexRegion.Offset);
                     vkCmdBindIndexBuffer(CommandBuffer, FullscreenPlane->IndexRegion.Buffer->Handle, FullscreenPlane->IndexRegion.Offset,
                                          VK_INDEX_TYPE_UINT32);
 
@@ -619,7 +640,7 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
     }
 }
 
-static void depth_peeling_test_main() {
+static void test_main() {
     input_state InputState = {};
     window *Window = create_window(&InputState);
     vulkan_instance *VulkanInstance = create_vulkan_instance(Window);
@@ -633,9 +654,9 @@ static void depth_peeling_test_main() {
 
         // Frame processing.
         update_input_state(&InputState, Window->Handle);
-        camera_controls(&State->Scene->Camera.Transform, &InputState);
+        camera_controls(&State->Scene.Camera.Transform, &InputState);
         u32 SwapchainImageIndex = aquire_next_swapchain_image_index(VulkanInstance);
-        update_entity_uniform_buffer(VulkanInstance, State->Scene, SwapchainImageIndex);
+        update_entity_buffer_region(VulkanInstance, &State->Scene, State->EntityBuffer.Regions + SwapchainImageIndex);
         synchronize_current_frame(VulkanInstance, SwapchainImageIndex);
         submit_render_pass(VulkanInstance, &State->RenderPass, SwapchainImageIndex);
         cycle_frame(VulkanInstance);

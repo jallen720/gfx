@@ -92,6 +92,7 @@ struct entity_ubo
 struct entity
 {
     transform Transform;
+    vtk::descriptor_set *TextureDS;
     mesh *Mesh;
 };
 
@@ -107,7 +108,6 @@ struct scene
     camera Camera;
     ctk::smap<entity, MAX_ENTITIES> Entities;
     ctk::sarray<entity_ubo, MAX_ENTITIES> EntityUBOs;
-    vtk::uniform_buffer EntityBuffer;
 };
 
 ////////////////////////////////////////////////////////////
@@ -430,44 +430,6 @@ push_entity(scene *Scene, cstr Name)
     return ctk::push(&Scene->Entities, Name);
 }
 
-static scene *
-create_scene(assets *Assets, vulkan_instance *VulkanInstance, cstr Path = NULL)
-{
-    scene *Scene = ctk::allocate<scene>();
-    *Scene = {};
-    Scene->Camera.FieldOfView = 90;
-    Scene->EntityBuffer = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, scene::MAX_ENTITIES, sizeof(entity_ubo),
-                                                     VulkanInstance->Swapchain.Images.Count);
-    if(Path)
-    {
-        ctk::data SceneData = ctk::load_data(Path);
-
-        // Camera
-        ctk::data *CameraData = ctk::at(&SceneData, "camera");
-        Scene->Camera.Transform = load_transform(ctk::at(CameraData, "transform"));
-        Scene->Camera.FieldOfView = ctk::to_f32(CameraData, "field_of_view");
-
-        // Entities
-        ctk::data *EntityMap = ctk::at(&SceneData, "entities");
-        for(u32 EntityIndex = 0; EntityIndex < EntityMap->Children.Count; ++EntityIndex)
-        {
-            ctk::data *EntityData = ctk::at(EntityMap, EntityIndex);
-            entity *Entity = push_entity(Scene, EntityData->Key.Data);
-
-            // Transform
-            Entity->Transform = load_transform(ctk::at(EntityData, "transform"));
-
-            // Mesh
-            Entity->Mesh = ctk::at(&Assets->Meshes, ctk::to_cstr(EntityData, "mesh"));
-        }
-
-        // Cleanup
-        ctk::_free(&SceneData);
-    }
-
-    return Scene;
-}
-
 static void
 update_input_state(input_state *InputState, GLFWwindow *Window)
 {
@@ -531,7 +493,7 @@ aquire_next_swapchain_image_index(vulkan_instance *VulkanInstance)
 }
 
 static void
-update_entity_uniform_buffer(vulkan_instance *VulkanInstance, scene *Scene, u32 SwapchainImageIndex)
+update_entity_buffer_region(vulkan_instance *VulkanInstance, scene *Scene, vtk::region *EntityBufferRegion)
 {
     if(Scene->Entities.Count == 0) return;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
@@ -567,7 +529,7 @@ update_entity_uniform_buffer(vulkan_instance *VulkanInstance, scene *Scene, u32 
     }
 
     // Write all entity ubos to current frame's entity uniform buffer region.
-    vtk::write_to_host_region(VulkanInstance->Device.Logical, Scene->EntityBuffer.Regions + SwapchainImageIndex,
+    vtk::write_to_host_region(VulkanInstance->Device.Logical, EntityBufferRegion,
                               Scene->EntityUBOs.Data, ctk::byte_count(&Scene->EntityUBOs), 0);
 }
 

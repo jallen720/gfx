@@ -1,61 +1,37 @@
-camera
-{
-    transform
-    {
+camera {
+    transform {
         position [ 0 0 -1 ]
         rotation [ 0 0 0 ]
         scale [ 1 1 1 ]
     }
     field_of_view 90
 }
-entities
-{
-    sibenik
-    {
-        transform
-        {
+entities {
+    sibenik {
+        transform {
             position [ 20 -15 12 ]
             rotation [ 0 0 0 ]
             scale [ 1 1 1 ]
         }
-        descriptor_sets
-        [
-            entity
-            brick_texture
-        ]
-        graphics_pipeline default
+        texture brick
         mesh sibenik
     }
-    cube
-    {
-        transform
-        {
+    cube {
+        transform {
             position [ 0 0 0 ]
             rotation [ 0 0 0 ]
             scale [ 1 1 1 ]
         }
-        descriptor_sets
-        [
-            entity
-            grass_cube_texture
-        ]
-        graphics_pipeline default
+        texture grass_cube
         mesh cube
     }
-    quad
-    {
-        transform
-        {
+    quad {
+        transform {
             position [ 0 0 2 ]
             rotation [ 0 0 0 ]
             scale [ 16 16 16 ]
         }
-        descriptor_sets
-        [
-            entity
-            grass_texture
-        ]
-        graphics_pipeline default
+        texture brick
         mesh quad
     }
 }

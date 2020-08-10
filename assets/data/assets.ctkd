@@ -91,6 +91,24 @@ shader_modules {
         path assets/shaders/depth_peeling/peel.frag.spv
         stage VK_SHADER_STAGE_FRAGMENT_BIT
     }
+
+    # Lighting
+    lighting_deferred_vert {
+        path assets/shaders/lighting/deferred.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    lighting_deferred_frag {
+        path assets/shaders/lighting/deferred.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
+    lighting_lighting_vert {
+        path assets/shaders/lighting/lighting.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    lighting_lighting_frag {
+        path assets/shaders/lighting/lighting.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
 }
 models {
     cube { path assets/models/cube.obj }
