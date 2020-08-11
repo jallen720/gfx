@@ -7,6 +7,12 @@ struct state {
     vtk::render_pass RenderPass;
     VkDescriptorPool DescriptorPool;
     vtk::vertex_layout VertexLayout;
+    enum {
+        LIGHT_MODE_COMPOSITE,
+        LIGHT_MODE_ALBEDO,
+        LIGHT_MODE_POSITION,
+        LIGHT_MODE_NORMAL,
+    } LightMode;
     struct {
         u32 Position;
         u32 Normal;
@@ -80,12 +86,13 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     vtk::image_info ColorImageInfo = {};
     ColorImageInfo.Width = Swapchain->Extent.width;
     ColorImageInfo.Height = Swapchain->Extent.height;
-    ColorImageInfo.Format = Swapchain->ImageFormat;
     ColorImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
     ColorImageInfo.UsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
     ColorImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     ColorImageInfo.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    ColorImageInfo.Format = VK_FORMAT_R8G8B8A8_UNORM;
     State->AttachmentImages.Albedo = vtk::create_image(Device, &ColorImageInfo);
+    ColorImageInfo.Format = VK_FORMAT_R16G16B16A16_SFLOAT;
     State->AttachmentImages.Position = vtk::create_image(Device, &ColorImageInfo);
     State->AttachmentImages.Normal = vtk::create_image(Device, &ColorImageInfo);
 
@@ -96,7 +103,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
 
     // Attachments
     vtk::attachment *AlbedoAttachment = ctk::push(&RenderPassInfo.Attachments);
-    AlbedoAttachment->Description.format = ColorImageInfo.Format;
+    AlbedoAttachment->Description.format = VK_FORMAT_R8G8B8A8_UNORM;
     AlbedoAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
     AlbedoAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     AlbedoAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -107,7 +114,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     AlbedoAttachment->ClearValue = { 0, 0, 0, 0 };
 
     vtk::attachment *PositionAttachment = ctk::push(&RenderPassInfo.Attachments);
-    PositionAttachment->Description.format = ColorImageInfo.Format;
+    PositionAttachment->Description.format = VK_FORMAT_R16G16B16A16_SFLOAT;
     PositionAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
     PositionAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     PositionAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -118,7 +125,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     PositionAttachment->ClearValue = { 0, 0, 0, 0 };
 
     vtk::attachment *NormalAttachment = ctk::push(&RenderPassInfo.Attachments);
-    NormalAttachment->Description.format = ColorImageInfo.Format;
+    NormalAttachment->Description.format = VK_FORMAT_R16G16B16A16_SFLOAT;
     NormalAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
     NormalAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     NormalAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -520,6 +527,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     ctk::push(&LightingGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "lighting_lighting_frag"));
     ctk::push(&LightingGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.InputAttachments);
     ctk::push(&LightingGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.Lights);
+    ctk::push(&LightingGPInfo.PushConstantRanges, { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(s32) });
     ctk::push(&LightingGPInfo.VertexInputs, { 0, 0, State->VertexAttributeIndexes.Position });
     LightingGPInfo.VertexLayout = &State->VertexLayout;
     ctk::push(&LightingGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
@@ -530,12 +538,16 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
 
 static void create_scene(state *State, assets *Assets, vulkan_instance *VulkanInstance) {
     scene *Scene = &State->Scene;
-    ctk::data SceneData = ctk::load_data("assets/scenes/default.ctkd");
+    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+    ctk::data SceneData = ctk::load_data("assets/scenes/lighting_test.ctkd");
 
     // Camera
     ctk::data *CameraData = ctk::at(&SceneData, "camera");
     Scene->Camera.Transform = load_transform(ctk::at(CameraData, "transform"));
     Scene->Camera.FieldOfView = ctk::to_f32(CameraData, "field_of_view");
+    Scene->Camera.Aspect = Swapchain->Extent.width / (f32)Swapchain->Extent.height;
+    Scene->Camera.ZNear = ctk::to_f32(CameraData, "z_near");
+    Scene->Camera.ZFar = ctk::to_f32(CameraData, "z_far");
 
     // EntityMatrixes
     ctk::data *EntityMap = ctk::at(&SceneData, "entities");
@@ -564,12 +576,13 @@ static void create_scene(state *State, assets *Assets, vulkan_instance *VulkanIn
 static state *create_state(vulkan_instance *VulkanInstance, assets *Assets) {
     auto State = ctk::allocate<state>();
     *State = {};
+    State->LightMode = state::LIGHT_MODE_NORMAL;
     create_vulkan_state(State, VulkanInstance, Assets);
     create_scene(State, Assets, VulkanInstance);
     return State;
 }
 
-static void record_render_command_buffers(state *State, vulkan_instance *VulkanInstance, assets *Assets) {
+static void record_render_command_buffers(state *State, vulkan_instance *VulkanInstance, assets *Assets, u32 SwapchainImageIndex) {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
 
@@ -586,102 +599,95 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
     CommandBufferBeginInfo.flags = 0;
     CommandBufferBeginInfo.pInheritanceInfo = NULL;
 
-    for(u32 SwapchainImageIndex = 0; SwapchainImageIndex < Swapchain->Images.Count; ++SwapchainImageIndex) {
-        VkCommandBuffer CommandBuffer = *ctk::at(&RenderPass->CommandBuffers, SwapchainImageIndex);
-        vtk::validate_vk_result(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
-                                "vkBeginCommandBuffer", "failed to begin recording command buffer");
-        VkRenderPassBeginInfo RenderPassBeginInfo = {};
-        RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        RenderPassBeginInfo.renderPass = RenderPass->Handle;
-        RenderPassBeginInfo.framebuffer = *ctk::at(&RenderPass->Framebuffers, SwapchainImageIndex);
-        RenderPassBeginInfo.renderArea = RenderArea;
-        RenderPassBeginInfo.clearValueCount = RenderPass->ClearValues.Count;
-        RenderPassBeginInfo.pClearValues = RenderPass->ClearValues.Data;
+    VkCommandBuffer CommandBuffer = *ctk::at(&RenderPass->CommandBuffers, SwapchainImageIndex);
+    vtk::validate_vk_result(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
+                            "vkBeginCommandBuffer", "failed to begin recording command buffer");
+    VkRenderPassBeginInfo RenderPassBeginInfo = {};
+    RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    RenderPassBeginInfo.renderPass = RenderPass->Handle;
+    RenderPassBeginInfo.framebuffer = *ctk::at(&RenderPass->Framebuffers, SwapchainImageIndex);
+    RenderPassBeginInfo.renderArea = RenderArea;
+    RenderPassBeginInfo.clearValueCount = RenderPass->ClearValues.Count;
+    RenderPassBeginInfo.pClearValues = RenderPass->ClearValues.Data;
 
-        vkCmdBeginRenderPass(CommandBuffer, &RenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-            // Direct Stage
-            {
-                // Draw Light Diamonds
-                vtk::graphics_pipeline *UnlitColorGP = &State->GraphicsPipelines.UnlitColor;
-                mesh *LightDiamond = ctk::at(&Assets->Meshes, "light_diamond");
-                vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.LightMatrixes };
-                vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, UnlitColorGP->Handle);
+    vkCmdBeginRenderPass(CommandBuffer, &RenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+        // Direct Stage
+        {
+            // Draw Light Diamonds
+            vtk::graphics_pipeline *UnlitColorGP = &State->GraphicsPipelines.UnlitColor;
+            mesh *LightDiamond = ctk::at(&Assets->Meshes, "light_diamond");
+            vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.LightMatrixes };
+            vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, UnlitColorGP->Handle);
 
-                // Point Lights
-                for(u32 LightIndex = 0; LightIndex < Scene->Lights.Count; ++LightIndex) {
-                    vtk::bind_descriptor_sets(CommandBuffer, UnlitColorGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
-                                              SwapchainImageIndex, LightIndex);
-                    vkCmdPushConstants(CommandBuffer, UnlitColorGP->Layout, VK_SHADER_STAGE_FRAGMENT_BIT,
-                                       0, sizeof(ctk::vec3<f32>), &Scene->Lights[LightIndex].Color);
-                    vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &LightDiamond->VertexRegion.Buffer->Handle,
-                                           &LightDiamond->VertexRegion.Offset);
-                    vkCmdBindIndexBuffer(CommandBuffer, LightDiamond->IndexRegion.Buffer->Handle, LightDiamond->IndexRegion.Offset,
-                                         VK_INDEX_TYPE_UINT32);
-                    vkCmdDrawIndexed(CommandBuffer, LightDiamond->Indexes.Count, 1, 0, 0, 0);
-                }
-            }
-
-            vkCmdNextSubpass(CommandBuffer, VK_SUBPASS_CONTENTS_INLINE);
-
-            // Deferred Stage
-            {
-                vtk::graphics_pipeline *DeferredGP = &State->GraphicsPipelines.Deferred;
-                vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.EntityMatrixes };
-                for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
-                    entity *Entity = Scene->Entities.Values + EntityIndex;
-                    VkDescriptorSet *TextureDS = Entity->TextureDS->Instances + 0;
-                    mesh *Mesh = Entity->Mesh;
-
-                    // Graphics Pipeline
-                    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DeferredGP->Handle);
-
-                    // Bind Descriptor Sets
-                    vtk::bind_descriptor_sets(CommandBuffer, DeferredGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
-                                              SwapchainImageIndex, EntityIndex);
-                    vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DeferredGP->Layout,
-                                            1, 1, TextureDS,
-                                            0, NULL);
-
-                    // Vertex/Index Buffers
-                    vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh->VertexRegion.Buffer->Handle, &Mesh->VertexRegion.Offset);
-                    vkCmdBindIndexBuffer(CommandBuffer, Mesh->IndexRegion.Buffer->Handle, Mesh->IndexRegion.Offset, VK_INDEX_TYPE_UINT32);
-
-                    // Draw
-                    vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
-                }
-            }
-
-            vkCmdNextSubpass(CommandBuffer, VK_SUBPASS_CONTENTS_INLINE);
-
-            // Lighting Stage
-            {
-                vtk::graphics_pipeline *LightingGP = &State->GraphicsPipelines.Lighting;
-                mesh *FullscreenPlane = ctk::at(&Assets->Meshes, "fullscreen_plane");
-                VkDescriptorSet DescriptorSets[] = {
-                    State->DescriptorSets.InputAttachments.Instances[0],
-                    State->DescriptorSets.Lights.Instances[SwapchainImageIndex]
-                };
-
-                // Graphics Pipeline
-                vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, LightingGP->Handle);
-
-                // Bind Descriptor Sets
-                vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, LightingGP->Layout,
-                                        0, CTK_ARRAY_COUNT(DescriptorSets), DescriptorSets,
-                                        0, NULL);
-
-                // Vertex/Index Buffers
-                vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &FullscreenPlane->VertexRegion.Buffer->Handle,
-                                       &FullscreenPlane->VertexRegion.Offset);
-                vkCmdBindIndexBuffer(CommandBuffer, FullscreenPlane->IndexRegion.Buffer->Handle, FullscreenPlane->IndexRegion.Offset,
+            // Point Lights
+            for(u32 LightIndex = 0; LightIndex < Scene->Lights.Count; ++LightIndex) {
+                vtk::bind_descriptor_sets(CommandBuffer, UnlitColorGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
+                                          SwapchainImageIndex, LightIndex);
+                vkCmdPushConstants(CommandBuffer, UnlitColorGP->Layout, VK_SHADER_STAGE_FRAGMENT_BIT,
+                                   0, sizeof(ctk::vec3<f32>), &Scene->Lights[LightIndex].Color);
+                vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &LightDiamond->VertexRegion.Buffer->Handle,
+                                       &LightDiamond->VertexRegion.Offset);
+                vkCmdBindIndexBuffer(CommandBuffer, LightDiamond->IndexRegion.Buffer->Handle, LightDiamond->IndexRegion.Offset,
                                      VK_INDEX_TYPE_UINT32);
-
-                // Draw
-                vkCmdDrawIndexed(CommandBuffer, FullscreenPlane->Indexes.Count, 1, 0, 0, 0);
+                vkCmdDrawIndexed(CommandBuffer, LightDiamond->Indexes.Count, 1, 0, 0, 0);
             }
-        vkCmdEndRenderPass(CommandBuffer);
-        vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
-    }
+        }
+
+        vkCmdNextSubpass(CommandBuffer, VK_SUBPASS_CONTENTS_INLINE);
+
+        // Deferred Stage
+        {
+            vtk::graphics_pipeline *DeferredGP = &State->GraphicsPipelines.Deferred;
+            vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.EntityMatrixes };
+            for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
+                entity *Entity = Scene->Entities.Values + EntityIndex;
+                VkDescriptorSet *TextureDS = Entity->TextureDS->Instances + 0;
+                mesh *Mesh = Entity->Mesh;
+
+                vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DeferredGP->Handle);
+                vtk::bind_descriptor_sets(CommandBuffer, DeferredGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
+                                          SwapchainImageIndex, EntityIndex);
+                vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DeferredGP->Layout,
+                                        1, 1, TextureDS,
+                                        0, NULL);
+                vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh->VertexRegion.Buffer->Handle, &Mesh->VertexRegion.Offset);
+                vkCmdBindIndexBuffer(CommandBuffer, Mesh->IndexRegion.Buffer->Handle, Mesh->IndexRegion.Offset, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
+            }
+        }
+
+        vkCmdNextSubpass(CommandBuffer, VK_SUBPASS_CONTENTS_INLINE);
+
+        // Lighting Stage
+        {
+            vtk::graphics_pipeline *LightingGP = &State->GraphicsPipelines.Lighting;
+            mesh *FullscreenPlane = ctk::at(&Assets->Meshes, "fullscreen_plane");
+            VkDescriptorSet DescriptorSets[] = {
+                State->DescriptorSets.InputAttachments.Instances[0],
+                State->DescriptorSets.Lights.Instances[SwapchainImageIndex]
+            };
+
+            vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, LightingGP->Handle);
+            vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, LightingGP->Layout,
+                                    0, CTK_ARRAY_COUNT(DescriptorSets), DescriptorSets,
+                                    0, NULL);
+            vkCmdPushConstants(CommandBuffer, LightingGP->Layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(s32), &State->LightMode);
+            vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &FullscreenPlane->VertexRegion.Buffer->Handle,
+                                   &FullscreenPlane->VertexRegion.Offset);
+            vkCmdBindIndexBuffer(CommandBuffer, FullscreenPlane->IndexRegion.Buffer->Handle, FullscreenPlane->IndexRegion.Offset,
+                                 VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(CommandBuffer, FullscreenPlane->Indexes.Count, 1, 0, 0, 0);
+        }
+    vkCmdEndRenderPass(CommandBuffer);
+    vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
+}
+
+static void update_scene(VkDevice LogicalDevice, state *State, input_state *InputState, u32 SwapchainImageIndex) {
+    scene *Scene = &State->Scene;
+    glm::mat4 ViewProjectionMatrix = view_projection_matrix(&Scene->Camera);
+    update_entity_matrixes(LogicalDevice, State->UniformBuffers.EntityMatrixes.Regions + SwapchainImageIndex, Scene, ViewProjectionMatrix);
+    update_light_matrixes(LogicalDevice, State->UniformBuffers.LightMatrixes.Regions + SwapchainImageIndex, Scene, ViewProjectionMatrix);
+    update_lights(LogicalDevice, State->UniformBuffers.Lights.Regions + SwapchainImageIndex, Scene);
 }
 
 static void test_main() {
@@ -690,19 +696,25 @@ static void test_main() {
     vulkan_instance *VulkanInstance = create_vulkan_instance(Window);
     assets *Assets = create_assets(VulkanInstance);
     state *State = create_state(VulkanInstance, Assets);
-    record_render_command_buffers(State, VulkanInstance, Assets);
     while(!glfwWindowShouldClose(Window->Handle)) {
         // Check if window should close.
         glfwPollEvents();
         if(InputState.KeyDown[GLFW_KEY_ESCAPE]) break;
 
-        // Frame processing.
+        // Process input.
         update_input_state(&InputState, Window->Handle);
         camera_controls(&State->Scene.Camera.Transform, &InputState);
+
+        // Light mode controls.
+             if(InputState.KeyDown[GLFW_KEY_F1]) State->LightMode = state::LIGHT_MODE_COMPOSITE;
+        else if(InputState.KeyDown[GLFW_KEY_F2]) State->LightMode = state::LIGHT_MODE_ALBEDO;
+        else if(InputState.KeyDown[GLFW_KEY_F3]) State->LightMode = state::LIGHT_MODE_POSITION;
+        else if(InputState.KeyDown[GLFW_KEY_F4]) State->LightMode = state::LIGHT_MODE_NORMAL;
+
+        // Process frame.
         u32 SwapchainImageIndex = aquire_next_swapchain_image_index(VulkanInstance);
-        update_entity_matrixes(VulkanInstance, &State->Scene, State->UniformBuffers.EntityMatrixes.Regions + SwapchainImageIndex);
-        update_light_matrixes(VulkanInstance, &State->Scene, State->UniformBuffers.LightMatrixes.Regions + SwapchainImageIndex);
-        update_lights(VulkanInstance, &State->Scene, State->UniformBuffers.Lights.Regions + SwapchainImageIndex);
+        record_render_command_buffers(State, VulkanInstance, Assets, SwapchainImageIndex);
+        update_scene(VulkanInstance->Device.Logical, State, &InputState, SwapchainImageIndex);
         synchronize_current_frame(VulkanInstance, SwapchainImageIndex);
         submit_render_pass(VulkanInstance, &State->RenderPass, SwapchainImageIndex);
         cycle_frame(VulkanInstance);

@@ -6,7 +6,7 @@ struct state {
     static const u32 DEPTH_PEEL_LAYER_COUNT = 24;
     static const u32 DEPTH_PEEL_LAYER_SUBPASS_BASE_INDEX = 2;
     scene Scene;
-    vtk::uniform_buffer EntityBuffer;
+    vtk::uniform_buffer EntityMatrixesBuffer;
     vtk::render_pass RenderPass;
     VkDescriptorPool DescriptorPool;
     vtk::vertex_layout VertexLayout;
@@ -20,12 +20,12 @@ struct state {
         vtk::image PeelColor;
     } AttachmentImages;
     struct {
-        VkDescriptorSetLayout EntityBuffer;
+        VkDescriptorSetLayout EntityMatrixesBuffer;
         VkDescriptorSetLayout PeelDepthImage;
         VkDescriptorSetLayout PeelColorImage;
     } DescriptorSetLayouts;
     struct {
-        vtk::descriptor_set EntityBuffer;
+        vtk::descriptor_set EntityMatrixesBuffer;
         vtk::descriptor_set PeelDepthImage[2];
         vtk::descriptor_set PeelColorImage;
     } DescriptorSets;
@@ -44,7 +44,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     ////////////////////////////////////////////////////////////
     /// Buffers
     ////////////////////////////////////////////////////////////
-    State->EntityBuffer = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, scene::MAX_ENTITIES, sizeof(entity_ubo),
+    State->EntityMatrixesBuffer = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, scene::MAX_ENTITIES, sizeof(matrix_ubo),
                                                      VulkanInstance->Swapchain.Images.Count);
 
     ////////////////////////////////////////////////////////////
@@ -211,7 +211,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     ////////////////////////////////////////////////////////////
     /// Descriptor Sets
     ////////////////////////////////////////////////////////////
-    vtk::descriptor_set *EntityBufferDS = &State->DescriptorSets.EntityBuffer;
+    vtk::descriptor_set *EntityMatrixesBufferDS = &State->DescriptorSets.EntityMatrixesBuffer;
     vtk::descriptor_set *PeelDepthImageDS = State->DescriptorSets.PeelDepthImage;
     vtk::descriptor_set *PeelColorImageDS = &State->DescriptorSets.PeelColorImage;
 
@@ -230,7 +230,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     vtk::validate_vk_result(vkCreateDescriptorPool(Device->Logical, &DescriptorPoolCreateInfo, NULL, &State->DescriptorPool),
                             "vkCreateDescriptorPool", "failed to create descriptor pool");
 
-    // EntityBuffer
+    // EntityMatrixesBuffer
     {
         // Layout
         ctk::sarray<VkDescriptorSetLayoutBinding, 4> LayoutBindings = {};
@@ -241,23 +241,23 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
         DescriptorSetLayoutCreateInfo.bindingCount = LayoutBindings.Count;
         DescriptorSetLayoutCreateInfo.pBindings = LayoutBindings.Data;
         vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &DescriptorSetLayoutCreateInfo, NULL,
-                                                            &State->DescriptorSetLayouts.EntityBuffer),
+                                                            &State->DescriptorSetLayouts.EntityMatrixesBuffer),
                                 "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
 
         // Initialization
-        EntityBufferDS->Instances.Count = Swapchain->Images.Count;
-        ctk::push(&EntityBufferDS->DynamicOffsets, State->EntityBuffer.ElementSize);
+        EntityMatrixesBufferDS->Instances.Count = Swapchain->Images.Count;
+        ctk::push(&EntityMatrixesBufferDS->DynamicOffsets, State->EntityMatrixesBuffer.ElementSize);
 
         // Allocation
         ctk::sarray<VkDescriptorSetLayout, 4> DuplicateLayouts = {};
-        CTK_ITERATE(EntityBufferDS->Instances.Count) ctk::push(&DuplicateLayouts, State->DescriptorSetLayouts.EntityBuffer);
+        CTK_ITERATE(EntityMatrixesBufferDS->Instances.Count) ctk::push(&DuplicateLayouts, State->DescriptorSetLayouts.EntityMatrixesBuffer);
 
         VkDescriptorSetAllocateInfo DescriptorSetAllocateInfo = {};
         DescriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         DescriptorSetAllocateInfo.descriptorPool = State->DescriptorPool;
-        DescriptorSetAllocateInfo.descriptorSetCount = EntityBufferDS->Instances.Count;
+        DescriptorSetAllocateInfo.descriptorSetCount = EntityMatrixesBufferDS->Instances.Count;
         DescriptorSetAllocateInfo.pSetLayouts = DuplicateLayouts.Data;
-        vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &DescriptorSetAllocateInfo, EntityBufferDS->Instances.Data),
+        vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &DescriptorSetAllocateInfo, EntityMatrixesBufferDS->Instances.Data),
                                 "vkAllocateDescriptorSets", "failed to allocate descriptor sets");
     }
 
@@ -323,24 +323,24 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     ctk::sarray<VkDescriptorImageInfo, 16> DescriptorImageInfos = {};
     ctk::sarray<VkWriteDescriptorSet, 16> WriteDescriptorSets = {};
 
-    // EntityBuffer
-    CTK_ITERATE(EntityBufferDS->Instances.Count) {
-        VkDescriptorSet DescriptorSet = EntityBufferDS->Instances[IterationIndex];
-        vtk::region *EntityBufferRegion = State->EntityBuffer.Regions + IterationIndex;
+    // EntityMatrixesBuffer
+    CTK_ITERATE(EntityMatrixesBufferDS->Instances.Count) {
+        VkDescriptorSet DescriptorSet = EntityMatrixesBufferDS->Instances[IterationIndex];
+        vtk::region *EntityMatrixesBufferRegion = State->EntityMatrixesBuffer.Regions + IterationIndex;
 
         VkDescriptorBufferInfo *EntityDescriptorBufferInfo = ctk::push(&DescriptorBufferInfos);
-        EntityDescriptorBufferInfo->buffer = EntityBufferRegion->Buffer->Handle;
-        EntityDescriptorBufferInfo->offset = EntityBufferRegion->Offset;
-        EntityDescriptorBufferInfo->range = EntityBufferRegion->Size;
+        EntityDescriptorBufferInfo->buffer = EntityMatrixesBufferRegion->Buffer->Handle;
+        EntityDescriptorBufferInfo->offset = EntityMatrixesBufferRegion->Offset;
+        EntityDescriptorBufferInfo->range = EntityMatrixesBufferRegion->Size;
 
-        VkWriteDescriptorSet *EntityBufferWrite = ctk::push(&WriteDescriptorSets);
-        EntityBufferWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        EntityBufferWrite->dstSet = DescriptorSet;
-        EntityBufferWrite->dstBinding = 0;
-        EntityBufferWrite->dstArrayElement = 0;
-        EntityBufferWrite->descriptorCount = 1;
-        EntityBufferWrite->descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-        EntityBufferWrite->pBufferInfo = EntityDescriptorBufferInfo;
+        VkWriteDescriptorSet *EntityMatrixesBufferWrite = ctk::push(&WriteDescriptorSets);
+        EntityMatrixesBufferWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        EntityMatrixesBufferWrite->dstSet = DescriptorSet;
+        EntityMatrixesBufferWrite->dstBinding = 0;
+        EntityMatrixesBufferWrite->dstArrayElement = 0;
+        EntityMatrixesBufferWrite->descriptorCount = 1;
+        EntityMatrixesBufferWrite->descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        EntityMatrixesBufferWrite->pBufferInfo = EntityDescriptorBufferInfo;
     }
 
     // PeelDepthImages
@@ -385,7 +385,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     vtk::graphics_pipeline_info FirstPeelGPInfo = vtk::default_graphics_pipeline_info();
     ctk::push(&FirstPeelGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "depth_peeling_first_peel_vert"));
     ctk::push(&FirstPeelGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "depth_peeling_first_peel_frag"));
-    ctk::push(&FirstPeelGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.EntityBuffer);
+    ctk::push(&FirstPeelGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.EntityMatrixesBuffer);
     ctk::push(&FirstPeelGPInfo.VertexInputs, { 0, 0, State->VertexAttributeIndexes.Position });
     FirstPeelGPInfo.VertexLayout = &State->VertexLayout;
     ctk::push(&FirstPeelGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
@@ -427,7 +427,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     vtk::graphics_pipeline_info PeelGPInfo = vtk::default_graphics_pipeline_info();
     ctk::push(&PeelGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "depth_peeling_peel_vert"));
     ctk::push(&PeelGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "depth_peeling_peel_frag"));
-    ctk::push(&PeelGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.EntityBuffer);
+    ctk::push(&PeelGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.EntityMatrixesBuffer);
     ctk::push(&PeelGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.PeelDepthImage);
     ctk::push(&PeelGPInfo.VertexInputs, { 0, 0, State->VertexAttributeIndexes.Position });
     PeelGPInfo.VertexLayout = &State->VertexLayout;
@@ -452,12 +452,16 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
 
 static void create_scene(state *State, assets *Assets, vulkan_instance *VulkanInstance) {
     scene *Scene = &State->Scene;
+    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
     ctk::data SceneData = ctk::load_data("assets/scenes/empty.ctkd");
 
     // Camera
     ctk::data *CameraData = ctk::at(&SceneData, "camera");
     Scene->Camera.Transform = load_transform(ctk::at(CameraData, "transform"));
     Scene->Camera.FieldOfView = ctk::to_f32(CameraData, "field_of_view");
+    Scene->Camera.Aspect = Swapchain->Extent.width / (f32)Swapchain->Extent.height;
+    Scene->Camera.ZNear = ctk::to_f32(CameraData, "z_near");
+    Scene->Camera.ZFar = ctk::to_f32(CameraData, "z_far");
 
     // Create Entities
     for(s32 Z = 0; Z < 8; ++Z)
@@ -515,7 +519,7 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
             // First Peel Stage
             {
                 vtk::graphics_pipeline *FirstPeelGP = &State->GraphicsPipelines.FirstPeel;
-                vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.EntityBuffer };
+                vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.EntityMatrixesBuffer };
                 for(u32 EntityIndex = 0; EntityIndex < State->Scene.Entities.Count; ++EntityIndex) {
                     mesh *Mesh = State->Scene.Entities.Values[EntityIndex].Mesh;
 
@@ -564,7 +568,7 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
                 // Peel Stage
                 {
                     vtk::graphics_pipeline *PeelGP = State->GraphicsPipelines.Peel + IterationIndex;
-                    vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.EntityBuffer };
+                    vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.EntityMatrixesBuffer };
 
                     // Increment Subpass
                     vkCmdNextSubpass(CommandBuffer, VK_SUBPASS_CONTENTS_INLINE);
@@ -640,6 +644,12 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
     }
 }
 
+static void update_scene(VkDevice LogicalDevice, state *State, input_state *InputState, u32 SwapchainImageIndex) {
+    scene *Scene = &State->Scene;
+    glm::mat4 ViewProjectionMatrix = view_projection_matrix(&Scene->Camera);
+    update_entity_matrixes(LogicalDevice, State->EntityMatrixesBuffer.Regions + SwapchainImageIndex, Scene, ViewProjectionMatrix);
+}
+
 static void test_main() {
     input_state InputState = {};
     window *Window = create_window(&InputState);
@@ -652,11 +662,13 @@ static void test_main() {
         glfwPollEvents();
         if(InputState.KeyDown[GLFW_KEY_ESCAPE]) break;
 
-        // Frame processing.
+        // Process input.
         update_input_state(&InputState, Window->Handle);
         camera_controls(&State->Scene.Camera.Transform, &InputState);
+
+        // Process frame.
         u32 SwapchainImageIndex = aquire_next_swapchain_image_index(VulkanInstance);
-        update_entity_matrixes(VulkanInstance, &State->Scene, State->EntityBuffer.Regions + SwapchainImageIndex);
+        update_scene(VulkanInstance->Device.Logical, State, &InputState, SwapchainImageIndex);
         synchronize_current_frame(VulkanInstance, SwapchainImageIndex);
         submit_render_pass(VulkanInstance, &State->RenderPass, SwapchainImageIndex);
         cycle_frame(VulkanInstance);

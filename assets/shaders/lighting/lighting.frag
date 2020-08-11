@@ -1,6 +1,11 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
+#define MODE_COMPOSITE 0
+#define MODE_ALBEDO 1
+#define MODE_POSITION 2
+#define MODE_NORMAL 3
+
 struct light {
     vec3 Position;
     float Range;
@@ -17,19 +22,46 @@ layout(set = 1, binding = 0, std140) uniform lights {
     uint Count;
 } Lights;
 
+layout(push_constant) uniform push_constants {
+    int Mode;
+} PushConstants;
+
 layout(location = 0) out vec4 OutColor;
 
 void main() {
-    const vec4 AMBIENT = vec4(vec3(0.1), 1);
     vec4 Albedo = subpassLoad(AlbedoInput);
     vec4 Position = subpassLoad(PositionInput);
     vec4 Normal = subpassLoad(NormalInput);
-    if(Position.x == 0 && Position.y == 0 && Position.z == 0) discard;
-    vec4 FinalColor = Albedo * AMBIENT;
-    for(uint LightIndex = 0; LightIndex < 2; ++LightIndex) {
-        if(distance(Lights.Data[LightIndex].Position, vec3(Position)) < Lights.Data[LightIndex].Range) {
-            FinalColor += Lights.Data[LightIndex].Color * 0.4;
+
+    switch(PushConstants.Mode) {
+        case MODE_COMPOSITE: {
+            const vec4 AMBIENT = vec4(vec3(0.1), 1);
+            if(Position.x == 0 && Position.y == 0 && Position.z == 0) discard;
+            vec4 FinalColor = Albedo * AMBIENT;
+            for(uint LightIndex = 0; LightIndex < 2; ++LightIndex) {
+                if(distance(Lights.Data[LightIndex].Position, vec3(Position)) < Lights.Data[LightIndex].Range) {
+                    FinalColor += Lights.Data[LightIndex].Color * 0.4;
+                }
+            }
+            OutColor = FinalColor;
+            break;
+        }
+        case MODE_ALBEDO: {
+            OutColor = Albedo;
+            break;
+        }
+        case MODE_POSITION: {
+            OutColor = Position / 16;
+            OutColor.y *= -1;
+            break;
+        }
+        case MODE_NORMAL: {
+            OutColor = Normal;
+            OutColor.y *= -1;
+            break;
+        }
+        default: {
+            OutColor = vec4(0.51, 0.96, 0.17, 1);
         }
     }
-    OutColor = FinalColor;
 }

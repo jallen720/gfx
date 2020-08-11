@@ -10,8 +10,8 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.000000
 d 1.000000
 illum 1
-map_Bump C:\\Users\\joela\\dev\\projects\\vkproj\\models\\sibenik\\kamen-bump.png
-map_Kd C:\\Users\\joela\\dev\\projects\\vkproj\\models\\sibenik\\kamen.png
+map_Bump kamen-bump.png
+map_Kd kamen.png
 
 newmtl kamen_zid_parapet
 Ns 7.999999
@@ -22,7 +22,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.000000
 d 1.000000
 illum 1
-map_Kd C:\\Users\\joela\\dev\\projects\\vkproj\\models\\sibenik\\KAMEN-stup.png
+map_Kd KAMEN-stup.png
 
 newmtl kamen_zid_prozor
 Ns 7.999999
@@ -33,8 +33,8 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.000000
 d 1.000000
 illum 1
-map_Bump C:\\Users\\joela\\dev\\projects\\vkproj\\models\\sibenik\\kamen-bump.png
-map_Kd C:\\Users\\joela\\dev\\projects\\vkproj\\models\\sibenik\\kamen.png
+map_Bump kamen-bump.png
+map_Kd kamen.png
 
 newmtl pod
 Ns 7.999999
@@ -45,8 +45,8 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.000000
 d 1.000000
 illum 1
-map_Bump C:\\Users\\joela\\dev\\projects\\vkproj\\models\\sibenik\\mramor6x6-bump.png
-map_Kd C:\\Users\\joela\\dev\\projects\\vkproj\\models\\sibenik\\mramor6x6.png
+map_Bump mramor6x6-bump.png
+map_Kd mramor6x6.png
 
 newmtl pod_rub
 Ns 7.999999
@@ -57,8 +57,8 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.000000
 d 1.000000
 illum 1
-map_Bump C:\\Users\\joela\\dev\\projects\\vkproj\\models\\sibenik\\kamen-bump.png
-map_Kd C:\\Users\\joela\\dev\\projects\\vkproj\\models\\sibenik\\kamen.png
+map_Bump kamen-bump.png
+map_Kd kamen.png
 
 newmtl pod_tepih
 Ns 7.999999
@@ -79,7 +79,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.000000
 d 1.000000
 illum 1
-map_Kd C:\\Users\\joela\\dev\\projects\\vkproj\\models\\sibenik\\KAMEN-stup.png
+map_Kd KAMEN-stup.png
 
 newmtl sprljci
 Ns 7.999999
@@ -150,7 +150,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.000000
 d 1.000000
 illum 1
-map_Kd C:\\Users\\joela\\dev\\projects\\vkproj\\models\\sibenik\\KAMEN-stup.png
+map_Kd KAMEN-stup.png
 
 newmtl zid_vani
 Ns 7.999999
@@ -161,5 +161,5 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.000000
 d 1.000000
 illum 1
-map_Bump C:\\Users\\joela\\dev\\projects\\vkproj\\models\\sibenik\\kamen-bump.png
-map_Kd C:\\Users\\joela\\dev\\projects\\vkproj\\models\\sibenik\\kamen.png
+map_Bump kamen-bump.png
+map_Kd kamen.png

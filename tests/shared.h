@@ -96,6 +96,9 @@ struct entity {
 struct camera {
     transform Transform;
     f32 FieldOfView;
+    f32 Aspect;
+    f32 ZNear;
+    f32 ZFar;
 };
 
 struct scene {
@@ -358,7 +361,7 @@ static assets *create_assets(vulkan_instance *VulkanInstance) {
     for(u32 TextureIndex = 0; TextureIndex < TextureMap->Children.Count; ++TextureIndex) {
         ctk::data *TextureData = ctk::at(TextureMap, TextureIndex);
         vtk::texture_info TextureInfo = {};
-        TextureInfo.Filter = vtk::get_vk_filter(ctk::to_cstr(TextureData, "filter"));
+        TextureInfo.Filter = vtk::to_vk_filter(ctk::to_cstr(TextureData, "filter"));
         ctk::push(&Assets->Textures, TextureData->Key.Data,
                   vtk::create_texture(Device, VulkanInstance->GraphicsCommandPool, &VulkanInstance->StagingRegion,
                                       ctk::to_cstr(TextureData, "path"), &TextureInfo));
@@ -370,7 +373,7 @@ static assets *create_assets(vulkan_instance *VulkanInstance) {
     ctk::data *ShaderModuleMap = ctk::at(&AssetData, "shader_modules");
     for(u32 ShaderModuleIndex = 0; ShaderModuleIndex < ShaderModuleMap->Children.Count; ++ShaderModuleIndex) {
         ctk::data *ShaderModuleData = ctk::at(ShaderModuleMap, ShaderModuleIndex);
-        VkShaderStageFlagBits Stage = vtk::get_vk_shader_stage_flag_bits(ctk::to_cstr(ShaderModuleData, "stage"));
+        VkShaderStageFlagBits Stage = vtk::to_vk_shader_stage_flag_bits(ctk::to_cstr(ShaderModuleData, "stage"));
         ctk::push(&Assets->ShaderModules, ShaderModuleData->Key.Data,
                   vtk::create_shader_module(Device->Logical, ctk::to_cstr(ShaderModuleData, "path"), Stage));
     }
@@ -451,10 +454,8 @@ static u32 aquire_next_swapchain_image_index(vulkan_instance *VulkanInstance) {
     return SwapchainImageIndex;
 }
 
-static void update_entity_matrixes(vulkan_instance *VulkanInstance, scene *Scene, vtk::region *Region) {
-    if(Scene->Entities.Count == 0) return;
-    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
-    transform *CameraTransform = &Scene->Camera.Transform;
+static glm::mat4 view_projection_matrix(camera *Camera) {
+    transform *CameraTransform = &Camera->Transform;
 
     // View Matrix
     glm::vec3 CameraPosition = { CameraTransform->Position.X, CameraTransform->Position.Y, CameraTransform->Position.Z };
@@ -467,11 +468,14 @@ static void update_entity_matrixes(vulkan_instance *VulkanInstance, scene *Scene
     glm::mat4 ViewMatrix = glm::lookAt(CameraPosition, CameraPosition + CameraForward, { 0.0f, -1.0f, 0.0f });
 
     // Projection Matrix
-    f32 Aspect = Swapchain->Extent.width / (f32)Swapchain->Extent.height;
-    glm::mat4 ProjectionMatrix = glm::perspective(glm::radians(Scene->Camera.FieldOfView), Aspect, 0.1f, 1000.0f);
+    glm::mat4 ProjectionMatrix = glm::perspective(glm::radians(Camera->FieldOfView), Camera->Aspect, Camera->ZNear, Camera->ZFar);
     ProjectionMatrix[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
 
-    glm::mat4 ViewProjectionMatrix = ProjectionMatrix * ViewMatrix;
+    return ProjectionMatrix * ViewMatrix;
+}
+
+static void update_entity_matrixes(VkDevice LogicalDevice, vtk::region *Region, scene *Scene, glm::mat4 ViewProjectionMatrix) {
+    if(Scene->Entities.Count == 0) return;
 
     // Entity Model Matrixes
     for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
@@ -486,31 +490,11 @@ static void update_entity_matrixes(vulkan_instance *VulkanInstance, scene *Scene
         Scene->EntityMatrixUBOs[EntityIndex].ModelViewProjectionMatrix = ViewProjectionMatrix * ModelMatrix;
     }
 
-    vtk::write_to_host_region(VulkanInstance->Device.Logical, Region,
-                              Scene->EntityMatrixUBOs.Data, ctk::byte_count(&Scene->EntityMatrixUBOs), 0);
+    vtk::write_to_host_region(LogicalDevice, Region, Scene->EntityMatrixUBOs.Data, ctk::byte_count(&Scene->EntityMatrixUBOs), 0);
 }
 
-static void update_light_matrixes(vulkan_instance *VulkanInstance, scene *Scene, vtk::region *Region) {
+static void update_light_matrixes(VkDevice LogicalDevice, vtk::region *Region, scene *Scene, glm::mat4 ViewProjectionMatrix) {
     if(Scene->Lights.Count == 0) return;
-    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
-    transform *CameraTransform = &Scene->Camera.Transform;
-
-    // View Matrix
-    glm::vec3 CameraPosition = { CameraTransform->Position.X, CameraTransform->Position.Y, CameraTransform->Position.Z };
-    glm::mat4 CameraMatrix(1.0f);
-    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.X), { 1.0f, 0.0f, 0.0f });
-    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.Y), { 0.0f, 1.0f, 0.0f });
-    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
-    CameraMatrix = glm::translate(CameraMatrix, CameraPosition);
-    glm::vec3 CameraForward = { CameraMatrix[0][2], CameraMatrix[1][2], CameraMatrix[2][2] };
-    glm::mat4 ViewMatrix = glm::lookAt(CameraPosition, CameraPosition + CameraForward, { 0.0f, -1.0f, 0.0f });
-
-    // Projection Matrix
-    f32 Aspect = Swapchain->Extent.width / (f32)Swapchain->Extent.height;
-    glm::mat4 ProjectionMatrix = glm::perspective(glm::radians(Scene->Camera.FieldOfView), Aspect, 0.1f, 1000.0f);
-    ProjectionMatrix[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
-
-    glm::mat4 ViewProjectionMatrix = ProjectionMatrix * ViewMatrix;
 
     // Model Matrixes
     for(u32 LightIndex = 0; LightIndex < Scene->Lights.Count; ++LightIndex) {
@@ -521,12 +505,11 @@ static void update_light_matrixes(vulkan_instance *VulkanInstance, scene *Scene,
         Scene->LightMatrixUBOs[LightIndex].ModelViewProjectionMatrix = ViewProjectionMatrix * ModelMatrix;
     }
 
-    vtk::write_to_host_region(VulkanInstance->Device.Logical, Region,
-                              Scene->LightMatrixUBOs.Data, ctk::byte_count(&Scene->LightMatrixUBOs), 0);
+    vtk::write_to_host_region(LogicalDevice, Region, Scene->LightMatrixUBOs.Data, ctk::byte_count(&Scene->LightMatrixUBOs), 0);
 }
 
-static void update_lights(vulkan_instance *VulkanInstance, scene *Scene, vtk::region *Region) {
-    vtk::write_to_host_region(VulkanInstance->Device.Logical, Region, &Scene->Lights, sizeof(Scene->Lights), 0);
+static void update_lights(VkDevice LogicalDevice, vtk::region *Region, scene *Scene) {
+    vtk::write_to_host_region(LogicalDevice, Region, &Scene->Lights, sizeof(Scene->Lights), 0);
 }
 
 static void synchronize_current_frame(vulkan_instance *VulkanInstance, u32 SwapchainImageIndex) {
