@@ -19,8 +19,21 @@ textures {
         path assets/textures/transparent_window.png
         filter VK_FILTER_LINEAR
     }
+    tiles {
+        path assets/textures/tiles.png
+        filter VK_FILTER_LINEAR
+    }
 }
 shader_modules {
+    # Shared
+    unlit_color_vert {
+        path assets/shaders/unlit_color.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    unlit_color_frag {
+        path assets/shaders/unlit_color.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
     unlit_texture_vert {
         path assets/shaders/unlit_texture.vert.spv
         stage VK_SHADER_STAGE_VERTEX_BIT
@@ -116,4 +129,5 @@ models {
     quad { path assets/models/quad.obj }
     sibenik { path assets/models/sibenik/sibenik.obj }
     fullscreen_plane { path assets/models/fullscreen_plane.obj }
+    light_diamond { path assets/models/light_diamond.obj }
 }

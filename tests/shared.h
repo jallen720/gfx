@@ -26,23 +26,20 @@ static const ctk::vec2<f64> UNSET_MOUSE_POSITION = { -10000.0, -10000.0 };
 ////////////////////////////////////////////////////////////
 /// Data
 ////////////////////////////////////////////////////////////
-struct window
-{
+struct window {
     GLFWwindow *Handle;
     u32 Width;
     u32 Height;
 };
 
-struct input_state
-{
+struct input_state {
     b32 KeyDown[GLFW_KEY_LAST + 1];
     b32 MouseButtonDown[GLFW_MOUSE_BUTTON_LAST + 1];
     ctk::vec2<f64> MousePosition = UNSET_MOUSE_POSITION;
     ctk::vec2<f64> MouseDelta;
 };
 
-struct vulkan_instance
-{
+struct vulkan_instance {
     vtk::instance Instance;
     VkSurfaceKHR PlatformSurface;
     vtk::device Device;
@@ -54,68 +51,67 @@ struct vulkan_instance
     vtk::region StagingRegion;
 };
 
-struct vertex
-{
+struct vertex {
     ctk::vec3<f32> Position;
     ctk::vec3<f32> Normal;
     ctk::vec2<f32> UV;
 };
 
-struct mesh
-{
+struct mesh {
     ctk::array<vertex> Vertexes;
     ctk::array<u32> Indexes;
     vtk::region VertexRegion;
     vtk::region IndexRegion;
 };
 
-struct assets
-{
+struct assets {
     ctk::smap<mesh, 32> Meshes;
     ctk::smap<vtk::texture, 32> Textures;
     ctk::smap<vtk::shader_module, 32> ShaderModules;
 };
 
-struct transform
-{
+struct transform {
     ctk::vec3<f32> Position;
     ctk::vec3<f32> Rotation;
     ctk::vec3<f32> Scale;
 };
 
-struct entity_ubo
-{
+struct matrix_ubo {
     alignas(16) glm::mat4 ModelMatrix;
     alignas(16) glm::mat4 ModelViewProjectionMatrix;
 };
 
-struct entity
-{
+struct light {
+    ctk::vec3<f32> Position;
+    f32 Range;
+    ctk::vec4<f32> Color;
+};
+
+struct entity {
     transform Transform;
     vtk::descriptor_set *TextureDS;
     mesh *Mesh;
 };
 
-struct camera
-{
+struct camera {
     transform Transform;
     f32 FieldOfView;
 };
 
-struct scene
-{
+struct scene {
     static const u32 MAX_ENTITIES = 1024;
+    static const u32 MAX_LIGHTS = 16;
     camera Camera;
     ctk::smap<entity, MAX_ENTITIES> Entities;
-    ctk::sarray<entity_ubo, MAX_ENTITIES> EntityUBOs;
+    ctk::sarray<light, MAX_LIGHTS> Lights;
+    ctk::sarray<matrix_ubo, MAX_ENTITIES> EntityMatrixUBOs;
+    ctk::sarray<matrix_ubo, MAX_LIGHTS> LightMatrixUBOs;
 };
 
 ////////////////////////////////////////////////////////////
 /// Internal
 ////////////////////////////////////////////////////////////
-static void
-local_translate(transform *Transform, ctk::vec3<f32> Translation)
-{
+static void local_translate(transform *Transform, ctk::vec3<f32> Translation) {
     ctk::vec3<f32> *Position = &Transform->Position;
     ctk::vec3<f32> *Rotation = &Transform->Rotation;
 
@@ -146,22 +142,19 @@ local_translate(transform *Transform, ctk::vec3<f32> Translation)
     *Position = NewPosition + (Forward * Translation.Z);
 }
 
-static ctk::vec3<f32>
-load_vec3(ctk::data *Data)
-{
+static ctk::vec3<f32> load_vec3(ctk::data *Data) {
     return { ctk::to_f32(Data, 0u), ctk::to_f32(Data, 1u), ctk::to_f32(Data, 2u) };
 }
 
-static transform
-load_transform(ctk::data *Data)
-{
+static ctk::vec4<f32> load_vec4(ctk::data *Data) {
+    return { ctk::to_f32(Data, 0u), ctk::to_f32(Data, 1u), ctk::to_f32(Data, 2u), ctk::to_f32(Data, 3u) };
+}
+
+static transform load_transform(ctk::data *Data) {
     transform Transform = {};
-    if(Data->Children.Count == 0)
-    {
+    if(Data->Children.Count == 0) {
         Transform.Scale = { 1, 1, 1 };
-    }
-    else
-    {
+    } else {
         Transform.Position = load_vec3(ctk::at(Data, "position"));
         Transform.Rotation = load_vec3(ctk::at(Data, "rotation"));
         Transform.Scale = load_vec3(ctk::at(Data, "scale"));
@@ -169,29 +162,21 @@ load_transform(ctk::data *Data)
     return Transform;
 }
 
-static void
-error_callback(s32 Error, cstr Description)
-{
+static void error_callback(s32 Error, cstr Description) {
     CTK_FATAL("[%d] %s", Error, Description)
 }
 
-static void
-key_callback(GLFWwindow *Window, s32 Key, s32 Scancode, s32 Action, s32 Mods)
-{
+static void key_callback(GLFWwindow *Window, s32 Key, s32 Scancode, s32 Action, s32 Mods) {
     auto InputState = (input_state *)glfwGetWindowUserPointer(Window);
     InputState->KeyDown[Key] = Action == GLFW_PRESS || Action == GLFW_REPEAT;
 }
 
-static void
-mouse_button_callback(GLFWwindow *Window, s32 Button, s32 Action, s32 Mods)
-{
+static void mouse_button_callback(GLFWwindow *Window, s32 Button, s32 Action, s32 Mods) {
     auto InputState = (input_state *)glfwGetWindowUserPointer(Window);
     InputState->MouseButtonDown[Button] = Action == GLFW_PRESS || Action == GLFW_REPEAT;
 }
 
-static mesh
-create_mesh(vulkan_instance *VulkanInstance, cstr Path)
-{
+static mesh create_mesh(vulkan_instance *VulkanInstance, cstr Path) {
     mesh Mesh = {};
 
     vtk::device *Device = &VulkanInstance->Device;
@@ -204,8 +189,7 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
                           aiProcess_JoinIdenticalVertices |
                           aiProcess_SortByPType;
     const aiScene *Scene = aiImportFile(Path, ProcessingFlags);
-    if(Scene == NULL || Scene->mRootNode == NULL || Scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE)
-    {
+    if(Scene == NULL || Scene->mRootNode == NULL || Scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) {
         CTK_FATAL("error loading mesh from path \"%s\": %s", Path, aiGetErrorString())
     }
 
@@ -215,12 +199,10 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
     ctk::todo("HACK: Baking all meshes from file into single mesh.");
     u32 VertexCount = 0;
     u32 IndexCount = 0;
-    for(u32 MeshIndex = 0; MeshIndex < Scene->mNumMeshes; ++MeshIndex)
-    {
+    for(u32 MeshIndex = 0; MeshIndex < Scene->mNumMeshes; ++MeshIndex) {
         aiMesh *Mesh = Scene->mMeshes[MeshIndex];
         VertexCount += Mesh->mNumVertices;
-        for(u32 FaceIndex = 0; FaceIndex < Mesh->mNumFaces; ++FaceIndex)
-        {
+        for(u32 FaceIndex = 0; FaceIndex < Mesh->mNumFaces; ++FaceIndex) {
             IndexCount += Mesh->mFaces[FaceIndex].mNumIndices;
         }
     }
@@ -230,12 +212,10 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
     ////////////////////////////////////////////////////////////
     /// Processing
     ////////////////////////////////////////////////////////////
-    for(u32 MeshIndex = 0; MeshIndex < Scene->mNumMeshes; ++MeshIndex)
-    {
+    for(u32 MeshIndex = 0; MeshIndex < Scene->mNumMeshes; ++MeshIndex) {
         aiMesh *SceneMesh = Scene->mMeshes[MeshIndex];
         u32 IndexBase = Mesh.Vertexes.Count;
-        for(u32 VertexIndex = 0; VertexIndex < SceneMesh->mNumVertices; ++VertexIndex)
-        {
+        for(u32 VertexIndex = 0; VertexIndex < SceneMesh->mNumVertices; ++VertexIndex) {
             vertex *Vertex = ctk::push(&Mesh.Vertexes);
             aiVector3D *Position = SceneMesh->mVertices + VertexIndex;
             aiVector3D *Normal = SceneMesh->mNormals + VertexIndex;
@@ -243,21 +223,16 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
             Vertex->Normal = { Normal->x, Normal->y, Normal->z };
 
             // Texture coordinates are optional.
-            if(SceneMesh->mTextureCoords[0] == NULL)
-            {
+            if(SceneMesh->mTextureCoords[0] == NULL) {
                 Vertex->UV = { 0, 0 };
-            }
-            else
-            {
+            } else {
                 aiVector3D *UV = SceneMesh->mTextureCoords[0] + VertexIndex;
                 Vertex->UV = { UV->x, 1 - UV->y }; // Blender's UV y-axis is inverse from Vulkan's.
             }
         }
-        for(u32 FaceIndex = 0; FaceIndex < SceneMesh->mNumFaces; ++FaceIndex)
-        {
+        for(u32 FaceIndex = 0; FaceIndex < SceneMesh->mNumFaces; ++FaceIndex) {
             aiFace *Face = SceneMesh->mFaces + FaceIndex;
-            for(u32 IndexIndex = 0; IndexIndex < Face->mNumIndices; ++IndexIndex)
-            {
+            for(u32 IndexIndex = 0; IndexIndex < Face->mNumIndices; ++IndexIndex) {
                 ctk::push(&Mesh.Indexes, IndexBase + Face->mIndices[IndexIndex]);
             }
         }
@@ -282,15 +257,12 @@ create_mesh(vulkan_instance *VulkanInstance, cstr Path)
 ////////////////////////////////////////////////////////////
 /// Interface
 ////////////////////////////////////////////////////////////
-static window *
-create_window(input_state *InputState)
-{
+static window *create_window(input_state *InputState) {
     auto Window = ctk::allocate<window>();
     *Window = {};
     ctk::data Data = ctk::load_data("assets/data/window.ctkd");
     glfwSetErrorCallback(error_callback);
-    if(glfwInit() != GLFW_TRUE)
-    {
+    if(glfwInit() != GLFW_TRUE) {
         CTK_FATAL("failed to init GLFW")
     }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -298,8 +270,7 @@ create_window(input_state *InputState)
     Window->Width = ctk::to_s32(&Data, "width");
     Window->Height = ctk::to_s32(&Data, "height");
     Window->Handle = glfwCreateWindow(Window->Width, Window->Height, ctk::to_cstr(&Data, "title"), NULL, NULL);
-    if(Window->Handle == NULL)
-    {
+    if(Window->Handle == NULL) {
         CTK_FATAL("failed to create window")
     }
     glfwSetWindowPos(Window->Handle, ctk::to_s32(&Data, "x"), ctk::to_s32(&Data, "y"));
@@ -310,9 +281,7 @@ create_window(input_state *InputState)
     return Window;
 }
 
-static vulkan_instance *
-create_vulkan_instance(window *Window)
-{
+static vulkan_instance *create_vulkan_instance(window *Window) {
     auto VulkanInstance = ctk::allocate<vulkan_instance>();
     *VulkanInstance = {};
 
@@ -374,9 +343,7 @@ create_vulkan_instance(window *Window)
     return VulkanInstance;
 }
 
-static assets *
-create_assets(vulkan_instance *VulkanInstance)
-{
+static assets *create_assets(vulkan_instance *VulkanInstance) {
     auto Assets = ctk::allocate<assets>();
     *Assets = {};
 
@@ -388,8 +355,7 @@ create_assets(vulkan_instance *VulkanInstance)
     /// Textures
     ////////////////////////////////////////////////////////////
     ctk::data *TextureMap = ctk::at(&AssetData, "textures");
-    for(u32 TextureIndex = 0; TextureIndex < TextureMap->Children.Count; ++TextureIndex)
-    {
+    for(u32 TextureIndex = 0; TextureIndex < TextureMap->Children.Count; ++TextureIndex) {
         ctk::data *TextureData = ctk::at(TextureMap, TextureIndex);
         vtk::texture_info TextureInfo = {};
         TextureInfo.Filter = vtk::get_vk_filter(ctk::to_cstr(TextureData, "filter"));
@@ -402,8 +368,7 @@ create_assets(vulkan_instance *VulkanInstance)
     /// Shader Modules
     ////////////////////////////////////////////////////////////
     ctk::data *ShaderModuleMap = ctk::at(&AssetData, "shader_modules");
-    for(u32 ShaderModuleIndex = 0; ShaderModuleIndex < ShaderModuleMap->Children.Count; ++ShaderModuleIndex)
-    {
+    for(u32 ShaderModuleIndex = 0; ShaderModuleIndex < ShaderModuleMap->Children.Count; ++ShaderModuleIndex) {
         ctk::data *ShaderModuleData = ctk::at(ShaderModuleMap, ShaderModuleIndex);
         VkShaderStageFlagBits Stage = vtk::get_vk_shader_stage_flag_bits(ctk::to_cstr(ShaderModuleData, "stage"));
         ctk::push(&Assets->ShaderModules, ShaderModuleData->Key.Data,
@@ -414,8 +379,7 @@ create_assets(vulkan_instance *VulkanInstance)
     /// Meshes
     ////////////////////////////////////////////////////////////
     ctk::data *ModelMap = ctk::at(&AssetData, "models");
-    for(u32 ModelIndex = 0; ModelIndex < ModelMap->Children.Count; ++ModelIndex)
-    {
+    for(u32 ModelIndex = 0; ModelIndex < ModelMap->Children.Count; ++ModelIndex) {
         ctk::data *ModelData = ctk::at(ModelMap, ModelIndex);
         ctk::push(&Assets->Meshes, ModelData->Key.Data, create_mesh(VulkanInstance, ctk::to_cstr(ModelData, "path")));
     }
@@ -423,16 +387,17 @@ create_assets(vulkan_instance *VulkanInstance)
     return Assets;
 }
 
-static entity *
-push_entity(scene *Scene, cstr Name)
-{
-    ctk::push(&Scene->EntityUBOs);
+static entity *push_entity(scene *Scene, cstr Name) {
+    ctk::push(&Scene->EntityMatrixUBOs);
     return ctk::push(&Scene->Entities, Name);
 }
 
-static void
-update_input_state(input_state *InputState, GLFWwindow *Window)
-{
+static light *push_light(scene *Scene) {
+    ctk::push(&Scene->LightMatrixUBOs);
+    return ctk::push(&Scene->Lights);
+}
+
+static void update_input_state(input_state *InputState, GLFWwindow *Window) {
     // Mouse Delta
     ctk::vec2 PreviousMousePosition = InputState->MousePosition;
     f64 CurrentMouseX = 0.0;
@@ -441,18 +406,14 @@ update_input_state(input_state *InputState, GLFWwindow *Window)
     InputState->MousePosition = { CurrentMouseX, CurrentMouseY };
 
     // Calculate delta if previous position was not unset.
-    if(PreviousMousePosition != UNSET_MOUSE_POSITION)
-    {
+    if(PreviousMousePosition != UNSET_MOUSE_POSITION) {
         InputState->MouseDelta = InputState->MousePosition - PreviousMousePosition;
     }
 }
 
-static void
-camera_controls(transform *CameraTransform, input_state *InputState)
-{
+static void camera_controls(transform *CameraTransform, input_state *InputState) {
     // Rotation
-    if(InputState->MouseButtonDown[GLFW_MOUSE_BUTTON_2])
-    {
+    if(InputState->MouseButtonDown[GLFW_MOUSE_BUTTON_2]) {
         static const f32 SENS = 0.4f;
         CameraTransform->Rotation.X += InputState->MouseDelta.Y * SENS;
         CameraTransform->Rotation.Y -= InputState->MouseDelta.X * SENS;
@@ -473,9 +434,7 @@ camera_controls(transform *CameraTransform, input_state *InputState)
     local_translate(CameraTransform, Translation);
 }
 
-static u32
-aquire_next_swapchain_image_index(vulkan_instance *VulkanInstance)
-{
+static u32 aquire_next_swapchain_image_index(vulkan_instance *VulkanInstance) {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::frame_state *FrameState = &VulkanInstance->FrameState;
     vtk::frame *CurrentFrame = FrameState->Frames + FrameState->CurrentFrameIndex;
@@ -492,9 +451,7 @@ aquire_next_swapchain_image_index(vulkan_instance *VulkanInstance)
     return SwapchainImageIndex;
 }
 
-static void
-update_entity_buffer_region(vulkan_instance *VulkanInstance, scene *Scene, vtk::region *EntityBufferRegion)
-{
+static void update_entity_matrixes(vulkan_instance *VulkanInstance, scene *Scene, vtk::region *Region) {
     if(Scene->Entities.Count == 0) return;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
     transform *CameraTransform = &Scene->Camera.Transform;
@@ -514,9 +471,10 @@ update_entity_buffer_region(vulkan_instance *VulkanInstance, scene *Scene, vtk::
     glm::mat4 ProjectionMatrix = glm::perspective(glm::radians(Scene->Camera.FieldOfView), Aspect, 0.1f, 1000.0f);
     ProjectionMatrix[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
 
+    glm::mat4 ViewProjectionMatrix = ProjectionMatrix * ViewMatrix;
+
     // Entity Model Matrixes
-    for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex)
-    {
+    for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
         transform *EntityTransform = &Scene->Entities.Values[EntityIndex].Transform;
         glm::mat4 ModelMatrix(1.0f);
         ModelMatrix = glm::translate(ModelMatrix, { EntityTransform->Position.X, EntityTransform->Position.Y, EntityTransform->Position.Z });
@@ -524,18 +482,54 @@ update_entity_buffer_region(vulkan_instance *VulkanInstance, scene *Scene, vtk::
         ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Y), { 0.0f, 1.0f, 0.0f });
         ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
         ModelMatrix = glm::scale(ModelMatrix, { EntityTransform->Scale.X, EntityTransform->Scale.Y, EntityTransform->Scale.Z });
-        Scene->EntityUBOs[EntityIndex].ModelMatrix = ModelMatrix;
-        Scene->EntityUBOs[EntityIndex].ModelViewProjectionMatrix = ProjectionMatrix * ViewMatrix * ModelMatrix;
+        Scene->EntityMatrixUBOs[EntityIndex].ModelMatrix = ModelMatrix;
+        Scene->EntityMatrixUBOs[EntityIndex].ModelViewProjectionMatrix = ViewProjectionMatrix * ModelMatrix;
     }
 
-    // Write all entity ubos to current frame's entity uniform buffer region.
-    vtk::write_to_host_region(VulkanInstance->Device.Logical, EntityBufferRegion,
-                              Scene->EntityUBOs.Data, ctk::byte_count(&Scene->EntityUBOs), 0);
+    vtk::write_to_host_region(VulkanInstance->Device.Logical, Region,
+                              Scene->EntityMatrixUBOs.Data, ctk::byte_count(&Scene->EntityMatrixUBOs), 0);
 }
 
-static void
-synchronize_current_frame(vulkan_instance *VulkanInstance, u32 SwapchainImageIndex)
-{
+static void update_light_matrixes(vulkan_instance *VulkanInstance, scene *Scene, vtk::region *Region) {
+    if(Scene->Lights.Count == 0) return;
+    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+    transform *CameraTransform = &Scene->Camera.Transform;
+
+    // View Matrix
+    glm::vec3 CameraPosition = { CameraTransform->Position.X, CameraTransform->Position.Y, CameraTransform->Position.Z };
+    glm::mat4 CameraMatrix(1.0f);
+    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.X), { 1.0f, 0.0f, 0.0f });
+    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.Y), { 0.0f, 1.0f, 0.0f });
+    CameraMatrix = glm::rotate(CameraMatrix, glm::radians(CameraTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
+    CameraMatrix = glm::translate(CameraMatrix, CameraPosition);
+    glm::vec3 CameraForward = { CameraMatrix[0][2], CameraMatrix[1][2], CameraMatrix[2][2] };
+    glm::mat4 ViewMatrix = glm::lookAt(CameraPosition, CameraPosition + CameraForward, { 0.0f, -1.0f, 0.0f });
+
+    // Projection Matrix
+    f32 Aspect = Swapchain->Extent.width / (f32)Swapchain->Extent.height;
+    glm::mat4 ProjectionMatrix = glm::perspective(glm::radians(Scene->Camera.FieldOfView), Aspect, 0.1f, 1000.0f);
+    ProjectionMatrix[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
+
+    glm::mat4 ViewProjectionMatrix = ProjectionMatrix * ViewMatrix;
+
+    // Model Matrixes
+    for(u32 LightIndex = 0; LightIndex < Scene->Lights.Count; ++LightIndex) {
+        ctk::vec3<f32> *LightPosition = &Scene->Lights[LightIndex].Position;
+        glm::mat4 ModelMatrix(1.0f);
+        ModelMatrix = glm::translate(ModelMatrix, { LightPosition->X, LightPosition->Y, LightPosition->Z });
+        Scene->LightMatrixUBOs[LightIndex].ModelMatrix = ModelMatrix;
+        Scene->LightMatrixUBOs[LightIndex].ModelViewProjectionMatrix = ViewProjectionMatrix * ModelMatrix;
+    }
+
+    vtk::write_to_host_region(VulkanInstance->Device.Logical, Region,
+                              Scene->LightMatrixUBOs.Data, ctk::byte_count(&Scene->LightMatrixUBOs), 0);
+}
+
+static void update_lights(vulkan_instance *VulkanInstance, scene *Scene, vtk::region *Region) {
+    vtk::write_to_host_region(VulkanInstance->Device.Logical, Region, &Scene->Lights, sizeof(Scene->Lights), 0);
+}
+
+static void synchronize_current_frame(vulkan_instance *VulkanInstance, u32 SwapchainImageIndex) {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::frame_state *FrameState = &VulkanInstance->FrameState;
 
@@ -543,17 +537,14 @@ synchronize_current_frame(vulkan_instance *VulkanInstance, u32 SwapchainImageInd
 
     // Wait on swapchain image's previously associated frame fence before rendering.
     VkFence *PreviousFrameInFlightFence = FrameState->PreviousFrameInFlightFences + SwapchainImageIndex;
-    if(*PreviousFrameInFlightFence != VK_NULL_HANDLE)
-    {
+    if(*PreviousFrameInFlightFence != VK_NULL_HANDLE) {
         vkWaitForFences(Device->Logical, 1, PreviousFrameInFlightFence, VK_TRUE, UINT64_MAX);
     }
     vkResetFences(Device->Logical, 1, &CurrentFrame->InFlightFence);
     *PreviousFrameInFlightFence = CurrentFrame->InFlightFence;
 }
 
-static void
-submit_render_pass(vulkan_instance *VulkanInstance, vtk::render_pass *RenderPass, u32 SwapchainImageIndex)
-{
+static void submit_render_pass(vulkan_instance *VulkanInstance, vtk::render_pass *RenderPass, u32 SwapchainImageIndex) {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
     vtk::frame_state *FrameState = &VulkanInstance->FrameState;
@@ -603,9 +594,7 @@ submit_render_pass(vulkan_instance *VulkanInstance, vtk::render_pass *RenderPass
                             "failed to queue image for presentation");
 }
 
-static void
-cycle_frame(vulkan_instance *VulkanInstance)
-{
+static void cycle_frame(vulkan_instance *VulkanInstance) {
     vtk::frame_state *FrameState = &VulkanInstance->FrameState;
     FrameState->CurrentFrameIndex = (FrameState->CurrentFrameIndex + 1) % FrameState->Frames.Count;
 }

@@ -656,7 +656,7 @@ static void test_main() {
         update_input_state(&InputState, Window->Handle);
         camera_controls(&State->Scene.Camera.Transform, &InputState);
         u32 SwapchainImageIndex = aquire_next_swapchain_image_index(VulkanInstance);
-        update_entity_buffer_region(VulkanInstance, &State->Scene, State->EntityBuffer.Regions + SwapchainImageIndex);
+        update_entity_matrixes(VulkanInstance, &State->Scene, State->EntityBuffer.Regions + SwapchainImageIndex);
         synchronize_current_frame(VulkanInstance, SwapchainImageIndex);
         submit_render_pass(VulkanInstance, &State->RenderPass, SwapchainImageIndex);
         cycle_frame(VulkanInstance);

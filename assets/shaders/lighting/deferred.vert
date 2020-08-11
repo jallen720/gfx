@@ -15,7 +15,11 @@ layout(location = 2) out vec2 OutUV;
 
 void main() {
     gl_Position = Entity.MVPMatrix * vec4(InPosition, 1);
-    OutPosition = InPosition;
-    OutNormal = InNormal;
+    OutPosition = vec3(Entity.ModelMatrix * vec4(InPosition, 1));
+
+    mat3 NormalMatrix = transpose(inverse(mat3(Entity.ModelMatrix)));
+    OutNormal = NormalMatrix * normalize(InNormal);
+    // OutTangent = NormalMatrix * normalize(InTangent);
+
     OutUV = InUV;
 }

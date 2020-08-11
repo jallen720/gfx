@@ -1,24 +1,24 @@
 camera {
     transform {
-        position [ 0 0 -1 ]
-        rotation [ 0 0 0 ]
+        position [ 0 -2 0 ]
+        rotation [ 12.5 -45 0 ]
         scale [ 1 1 1 ]
     }
-    field_of_view 90
+    field_of_view 103
 }
 entities {
-    sibenik {
-        transform {
-            position [ 20 -15 12 ]
-            rotation [ 0 0 0 ]
-            scale [ 1 1 1 ]
-        }
-        texture brick
-        mesh sibenik
-    }
+    # sibenik {
+    #     transform {
+    #         position [ 20 -15 12 ]
+    #         rotation [ 0 0 0 ]
+    #         scale [ 1 1 1 ]
+    #     }
+    #     texture brick
+    #     mesh sibenik
+    # }
     cube {
         transform {
-            position [ 0 0 0 ]
+            position [ 1 -1 1 ]
             rotation [ 0 0 0 ]
             scale [ 1 1 1 ]
         }
@@ -27,11 +27,23 @@ entities {
     }
     quad {
         transform {
-            position [ 0 0 2 ]
-            rotation [ 0 0 0 ]
+            position [ 0 0 0 ]
+            rotation [ -90 0 0 ]
             scale [ 16 16 16 ]
         }
-        texture brick
+        texture tiles
         mesh quad
     }
 }
+lights [
+    {
+        position [ 3, -3, 3 ]
+        range 4
+        color [ 1, 0, 0, 1 ]
+    }
+    {
+        position [ 5, -3, 5 ]
+        range 4
+        color [ 0, 1, 1, 1 ]
+    }
+]

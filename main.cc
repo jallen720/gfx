@@ -1,3 +1,5 @@
+#include "ctk/ctk.h"
+
 // Tests
 // #include "gfx/tests/default.h"
 // #include "gfx/tests/stencil.h"
