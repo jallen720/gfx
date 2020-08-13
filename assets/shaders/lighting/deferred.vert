@@ -18,7 +18,7 @@ void main() {
     OutPosition = vec3(Entity.ModelMatrix * vec4(InPosition, 1));
 
     mat3 NormalMatrix = transpose(inverse(mat3(Entity.ModelMatrix)));
-    OutNormal = NormalMatrix * normalize(InNormal);
+    OutNormal = normalize(NormalMatrix * normalize(InNormal));
     // OutTangent = NormalMatrix * normalize(InTangent);
 
     OutUV = InUV;

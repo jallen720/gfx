@@ -1,7 +1,7 @@
 camera {
     transform {
-        position [ 0 -2 0 ]
-        rotation [ 12.5 -45 0 ]
+        position [ 0 -4 12 ]
+        rotation [ 45 -135 0 ]
         scale [ 1 1 1 ]
     }
     field_of_view 103
@@ -22,7 +22,7 @@ entities {
         transform {
             position [ 1 -1 1 ]
             rotation [ 0 0 0 ]
-            scale [ 1 1 1 ]
+            scale [ 10 10 10 ]
         }
         texture grass_cube
         mesh cube
@@ -31,7 +31,7 @@ entities {
         transform {
             position [ 0 0 0 ]
             rotation [ -90 0 0 ]
-            scale [ 16 16 1 ]
+            scale [ 16 16 50 ]
         }
         texture tiles
         mesh quad
@@ -39,7 +39,7 @@ entities {
 }
 lights [
     {
-        position [ 3.5, -3.5, 3.5 ]
+        position [ 1.5, -1.5, 1.5 ]
         range 4
         color [ 1, 0, 0, 1 ]
     }

@@ -501,6 +501,7 @@ static void update_light_matrixes(VkDevice LogicalDevice, vtk::region *Region, s
         ctk::vec3<f32> *LightPosition = &Scene->Lights[LightIndex].Position;
         glm::mat4 ModelMatrix(1.0f);
         ModelMatrix = glm::translate(ModelMatrix, { LightPosition->X, LightPosition->Y, LightPosition->Z });
+        ModelMatrix = glm::scale(ModelMatrix, { 0.25f, 0.25f, 0.25f });
         Scene->LightMatrixUBOs[LightIndex].ModelMatrix = ModelMatrix;
         Scene->LightMatrixUBOs[LightIndex].ModelViewProjectionMatrix = ViewProjectionMatrix * ModelMatrix;
     }

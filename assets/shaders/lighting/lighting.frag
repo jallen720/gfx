@@ -32,7 +32,6 @@ void main() {
     vec4 Albedo = subpassLoad(AlbedoInput);
     vec4 Position = subpassLoad(PositionInput);
     vec4 Normal = subpassLoad(NormalInput);
-
     switch(PushConstants.Mode) {
         case MODE_COMPOSITE: {
             const vec4 AMBIENT = vec4(vec3(0.1), 1);

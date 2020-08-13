@@ -111,7 +111,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     AlbedoAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     AlbedoAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     AlbedoAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    AlbedoAttachment->ClearValue = { 0, 0, 0, 0 };
+    AlbedoAttachment->ClearValue = { 0, 0, 0, 1 };
 
     vtk::attachment *PositionAttachment = ctk::push(&RenderPassInfo.Attachments);
     PositionAttachment->Description.format = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -122,7 +122,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     PositionAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     PositionAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     PositionAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    PositionAttachment->ClearValue = { 0, 0, 0, 0 };
+    PositionAttachment->ClearValue = { 0, 0, 0, 1 };
 
     vtk::attachment *NormalAttachment = ctk::push(&RenderPassInfo.Attachments);
     NormalAttachment->Description.format = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -133,7 +133,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     NormalAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     NormalAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     NormalAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    NormalAttachment->ClearValue = { 0, 0, 0, 0 };
+    NormalAttachment->ClearValue = { 0, 0, 0, 1 };
 
     vtk::attachment *DepthAttachment = ctk::push(&RenderPassInfo.Attachments);
     DepthAttachment->Description.format = DepthImageInfo.Format;
@@ -155,7 +155,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     SwapchainAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     SwapchainAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     SwapchainAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    SwapchainAttachment->ClearValue = { 0, 0, 0, 0 };
+    SwapchainAttachment->ClearValue = { 0, 0, 0, 1 };
 
     // Subpasses
     vtk::subpass *DirectSubpass = ctk::push(&RenderPassInfo.Subpasses);
@@ -621,7 +621,7 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
 
             // Point Lights
             for(u32 LightIndex = 0; LightIndex < Scene->Lights.Count; ++LightIndex) {
-                vtk::bind_descriptor_sets(CommandBuffer, UnlitColorGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
+                vtk::bind_descriptor_sets(CommandBuffer, UnlitColorGP->Layout, 0, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
                                           SwapchainImageIndex, LightIndex);
                 vkCmdPushConstants(CommandBuffer, UnlitColorGP->Layout, VK_SHADER_STAGE_FRAGMENT_BIT,
                                    0, sizeof(ctk::vec3<f32>), &Scene->Lights[LightIndex].Color);
@@ -645,7 +645,7 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
                 mesh *Mesh = Entity->Mesh;
 
                 vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DeferredGP->Handle);
-                vtk::bind_descriptor_sets(CommandBuffer, DeferredGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
+                vtk::bind_descriptor_sets(CommandBuffer, DeferredGP->Layout, 0, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
                                           SwapchainImageIndex, EntityIndex);
                 vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DeferredGP->Layout,
                                         1, 1, TextureDS,
@@ -664,7 +664,7 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
             mesh *FullscreenPlane = ctk::at(&Assets->Meshes, "fullscreen_plane");
             VkDescriptorSet DescriptorSets[] = {
                 State->DescriptorSets.InputAttachments.Instances[0],
-                State->DescriptorSets.Lights.Instances[SwapchainImageIndex]
+                State->DescriptorSets.Lights.Instances[SwapchainImageIndex],
             };
 
             vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, LightingGP->Handle);

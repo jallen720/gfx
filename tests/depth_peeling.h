@@ -527,7 +527,7 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
                     vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, FirstPeelGP->Handle);
 
                     // Bind Descriptor Sets
-                    vtk::bind_descriptor_sets(CommandBuffer, FirstPeelGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
+                    vtk::bind_descriptor_sets(CommandBuffer, FirstPeelGP->Layout, 0, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
                                               SwapchainImageIndex, EntityIndex);
 
                     // Vertex/Index Buffers
@@ -552,7 +552,7 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
                 vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, FirstBlendGP->Handle);
 
                 // Bind Descriptor Sets
-                vtk::bind_descriptor_sets(CommandBuffer, FirstBlendGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets));
+                vtk::bind_descriptor_sets(CommandBuffer, FirstBlendGP->Layout, 0, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets));
 
                 // Vertex/Index Buffers
                 vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &FullscreenPlane->VertexRegion.Buffer->Handle,
@@ -601,7 +601,7 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
                         vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PeelGP->Handle);
 
                         // Bind Descriptor Sets
-                        vtk::bind_descriptor_sets(CommandBuffer, PeelGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
+                        vtk::bind_descriptor_sets(CommandBuffer, PeelGP->Layout, 0, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
                                                   SwapchainImageIndex, EntityIndex);
 
                         // Vertex/Index Buffers
@@ -627,7 +627,7 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
                     vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, BlendGP->Handle);
 
                     // Bind Descriptor Sets
-                    vtk::bind_descriptor_sets(CommandBuffer, BlendGP->Layout, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets));
+                    vtk::bind_descriptor_sets(CommandBuffer, BlendGP->Layout, 0, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets));
 
                     // Vertex/Index Buffers
                     vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &FullscreenPlane->VertexRegion.Buffer->Handle,
