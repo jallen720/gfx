@@ -159,7 +159,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
 
     // Subpasses
     vtk::subpass *DirectSubpass = ctk::push(&RenderPassInfo.Subpasses);
-    ctk::push(&DirectSubpass->ColorAttachmentReferences, { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+    ctk::push(&DirectSubpass->ColorAttachmentReferences, { 4, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
     ctk::set(&DirectSubpass->DepthAttachmentReference, { 3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
 
     vtk::subpass *DeferredSubpass = ctk::push(&RenderPassInfo.Subpasses);
