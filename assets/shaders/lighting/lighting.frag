@@ -7,9 +7,14 @@
 #define MODE_NORMAL 3
 
 struct light {
-    vec3 Position;
-    float Range;
-    vec4 Color;
+    vec4  Color;
+    vec4  Position;
+    // vec3  direction;
+    // int   mode;
+    vec4 Linear;
+    vec4 Quadratic;
+    // float cutoff;
+    // float outer_cutoff;
 };
 
 layout(set = 0, binding = 0, input_attachment_index = 0) uniform subpassInput AlbedoInput;
@@ -28,19 +33,41 @@ layout(push_constant) uniform push_constants {
 
 layout(location = 0) out vec4 OutColor;
 
+vec4 calculate_diffuse_specular(vec4 Albedo, vec3 Position, vec3 Normal, vec4 Specular, vec4 SurfaceColor, vec3 DirectionToLight) {
+    // Diffuse
+    float DiffuseValue = max(dot(Normal, DirectionToLight), 0.0);
+    vec4 Diffuse = SurfaceColor * Albedo * DiffuseValue;
+
+    // // Specular
+    // vec3 ViewDirection = normalize(push_constants.view_position - Position);
+    // vec3 ReflectDirection = reflect(-DirectionToLight, Normal);
+    // float SpecularValue = pow(max(dot(ViewDirection, ReflectDirection), 0.0), material.shininess);
+    // vec4 Specular = SurfaceColor * Specular * SpecularValue;
+
+    return Diffuse/*  + Specular */;
+}
+
+float calculate_attenuation(light Light, float DistanceToLight) {
+    // Fatt = 1.0 / (Kc + Kl ∗ d + Kq ∗ d^2)
+    return 1 / (1.0 + (Light.Linear.x * DistanceToLight) + (Light.Quadratic.x * pow(DistanceToLight, 2)));
+}
+
 void main() {
     vec4 Albedo = subpassLoad(AlbedoInput);
-    vec4 Position = subpassLoad(PositionInput);
-    vec4 Normal = subpassLoad(NormalInput);
+    vec4 Specular = vec4(0);
+    vec3 Position = subpassLoad(PositionInput).rgb;
+    vec3 Normal = subpassLoad(NormalInput).rgb;
     switch(PushConstants.Mode) {
         case MODE_COMPOSITE: {
-            const vec4 AMBIENT = vec4(vec3(0.1), 1);
-            if(Position.x == 0 && Position.y == 0 && Position.z == 0) discard;
-            vec4 FinalColor = Albedo * AMBIENT;
-            for(uint LightIndex = 0; LightIndex < 2; ++LightIndex) {
-                if(distance(Lights.Data[LightIndex].Position, vec3(Position)) < Lights.Data[LightIndex].Range) {
-                    FinalColor += Lights.Data[LightIndex].Color * 0.4;
-                }
+            const float AMBIENT_VALUE = 0.01;
+            vec4 FinalColor = vec4(0);
+            for(uint LightIndex = 0; LightIndex < Lights.Count; ++LightIndex) {
+                vec4 SurfaceColor = Lights.Data[LightIndex].Color;
+                vec3 DirectionToLight = normalize(Lights.Data[LightIndex].Position.xyz - Position);
+                float DistanceToLight = distance(Lights.Data[LightIndex].Position.xyz, Position);
+                vec4 Ambient = Lights.Data[LightIndex].Color * AMBIENT_VALUE;
+                vec4 DiffuseSpecular = calculate_diffuse_specular(Albedo, Position, Normal, Specular, SurfaceColor, DirectionToLight);
+                FinalColor += (DiffuseSpecular + Ambient) * calculate_attenuation(Lights.Data[LightIndex], DistanceToLight);
             }
             OutColor = FinalColor;
             break;
@@ -50,12 +77,12 @@ void main() {
             break;
         }
         case MODE_POSITION: {
-            OutColor = Position / 16;
+            OutColor = vec4(Position / 16, 1);
             OutColor.y *= -1;
             break;
         }
         case MODE_NORMAL: {
-            OutColor = Normal;
+            OutColor = vec4(Normal, 1);
             OutColor.y *= -1;
             break;
         }
