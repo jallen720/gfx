@@ -2,7 +2,20 @@
 
 #include "gfx/tests/shared.h"
 
+static const u32 UNIFORM_BUFFER_ARRAY_PADDING = 8;
+
+struct lighting_push_constants {
+    ctk::vec3<f32> ViewPosition;
+    s32 Mode;
+};
+
+struct material {
+    f32 Shininess;
+    char Pad[12];
+};
+
 struct state {
+    static const u32 MAX_MATERIALS = 4;
     scene Scene;
     vtk::render_pass RenderPass;
     VkDescriptorPool DescriptorPool;
@@ -22,6 +35,7 @@ struct state {
         vtk::uniform_buffer EntityMatrixes;
         vtk::uniform_buffer LightMatrixes;
         vtk::uniform_buffer Lights;
+        vtk::uniform_buffer Materials;
     } UniformBuffers;
     struct {
         vtk::image Albedo;
@@ -47,6 +61,10 @@ struct state {
         vtk::graphics_pipeline Lighting;
         vtk::graphics_pipeline UnlitColor;
     } GraphicsPipelines;
+    struct {
+        lighting_push_constants Lighting;
+    } PushConstants;
+    ctk::sarray<material, MAX_MATERIALS> Materials;
 };
 
 static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, assets *Assets) {
@@ -67,7 +85,9 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
                                                                       Swapchain->Images.Count);
     State->UniformBuffers.LightMatrixes = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, scene::MAX_LIGHTS, sizeof(matrix_ubo),
                                                                      Swapchain->Images.Count);
-    State->UniformBuffers.Lights = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, 1, sizeof(State->Scene.Lights), Swapchain->Images.Count);
+    State->UniformBuffers.Lights = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, 1, sizeof(State->Scene.Lights) + UNIFORM_BUFFER_ARRAY_PADDING,
+                                                              Swapchain->Images.Count);
+    State->UniformBuffers.Materials = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, state::MAX_MATERIALS, sizeof(material), 1);
 
     ////////////////////////////////////////////////////////////
     /// Attachment Images
@@ -110,7 +130,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     AlbedoAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     AlbedoAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     AlbedoAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    AlbedoAttachment->ClearValue = { 0, 0, 0, 1 };
+    AlbedoAttachment->ClearValue = { 0, 0, 0, 0 };
 
     vtk::attachment *PositionAttachment = ctk::push(&RenderPassInfo.Attachments);
     PositionAttachment->Description.format = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -121,7 +141,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     PositionAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     PositionAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     PositionAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    PositionAttachment->ClearValue = { 0, 0, 0, 1 };
+    PositionAttachment->ClearValue = { 0, 0, 0, 0 };
 
     vtk::attachment *NormalAttachment = ctk::push(&RenderPassInfo.Attachments);
     NormalAttachment->Description.format = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -132,7 +152,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     NormalAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     NormalAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     NormalAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    NormalAttachment->ClearValue = { 0, 0, 0, 1 };
+    NormalAttachment->ClearValue = { 0, 0, 0, 0 };
 
     vtk::attachment *DepthAttachment = ctk::push(&RenderPassInfo.Attachments);
     DepthAttachment->Description.format = DepthImageInfo.Format;
@@ -154,7 +174,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     SwapchainAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     SwapchainAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     SwapchainAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    SwapchainAttachment->ClearValue = { 0, 0, 0, 1 };
+    SwapchainAttachment->ClearValue = { 0, 0, 0, 0 };
 
     // Subpasses
     vtk::subpass *DeferredSubpass = ctk::push(&RenderPassInfo.Subpasses);
@@ -526,7 +546,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     ctk::push(&LightingGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "lighting_lighting_frag"));
     ctk::push(&LightingGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.InputAttachments);
     ctk::push(&LightingGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.Lights);
-    ctk::push(&LightingGPInfo.PushConstantRanges, { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(s32) });
+    ctk::push(&LightingGPInfo.PushConstantRanges, { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(lighting_push_constants) });
     ctk::push(&LightingGPInfo.VertexInputs, { 0, 0, State->VertexAttributeIndexes.Position });
     LightingGPInfo.VertexLayout = &State->VertexLayout;
     ctk::push(&LightingGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
@@ -579,6 +599,7 @@ static void create_scene(state *State, assets *Assets, vulkan_instance *VulkanIn
         light *Light = push_light(Scene);
         Light->Color = load_vec4(ctk::at(LightData, "color"));
         Light->Position = load_vec3(ctk::at(LightData, "position"));
+        Light->AmbientIntensity = ctk::to_f32(LightData, "ambient_intensity");
         auto AttenuationValues = ATTENUATION_VALUES + ctk::to_u32(LightData, "attenuation_index");
         Light->Linear = AttenuationValues->X;
         Light->Quadratic = AttenuationValues->Y;
@@ -594,6 +615,10 @@ static state *create_state(vulkan_instance *VulkanInstance, assets *Assets) {
     // State->LightMode = state::LIGHT_MODE_NORMAL;
     create_vulkan_state(State, VulkanInstance, Assets);
     create_scene(State, Assets, VulkanInstance);
+
+    // Materials
+    ctk::push(&State->Materials, { 32 });
+
     return State;
 }
 
@@ -657,12 +682,16 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
                 State->DescriptorSets.InputAttachments.Instances[0],
                 State->DescriptorSets.Lights.Instances[SwapchainImageIndex],
             };
-
+            State->PushConstants.Lighting = {
+                Scene->Camera.Transform.Position,
+                State->LightMode,
+            };
             vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, LightingGP->Handle);
             vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, LightingGP->Layout,
                                     0, CTK_ARRAY_COUNT(DescriptorSets), DescriptorSets,
                                     0, NULL);
-            vkCmdPushConstants(CommandBuffer, LightingGP->Layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(s32), &State->LightMode);
+            vkCmdPushConstants(CommandBuffer, LightingGP->Layout, VK_SHADER_STAGE_FRAGMENT_BIT,
+                               0, sizeof(lighting_push_constants), &State->PushConstants.Lighting);
             vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &FullscreenPlane->VertexRegion.Buffer->Handle,
                                    &FullscreenPlane->VertexRegion.Offset);
             vkCmdBindIndexBuffer(CommandBuffer, FullscreenPlane->IndexRegion.Buffer->Handle, FullscreenPlane->IndexRegion.Offset,

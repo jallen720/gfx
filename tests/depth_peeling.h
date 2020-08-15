@@ -45,7 +45,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     /// Buffers
     ////////////////////////////////////////////////////////////
     State->EntityMatrixesBuffer = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, scene::MAX_ENTITIES, sizeof(matrix_ubo),
-                                                     VulkanInstance->Swapchain.Images.Count);
+                                                             VulkanInstance->Swapchain.Images.Count);
 
     ////////////////////////////////////////////////////////////
     /// Vertex Layout

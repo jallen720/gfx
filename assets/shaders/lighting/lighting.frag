@@ -7,14 +7,15 @@
 #define MODE_NORMAL 3
 
 struct light {
-    vec4  Color;
-    vec4  Position;
-    // vec3  direction;
-    // int   mode;
-    vec4 Linear;
-    vec4 Quadratic;
-    // float cutoff;
-    // float outer_cutoff;
+    vec4 Color;
+    vec3 Position;
+    float AmbientIntensity;
+    // vec3 Direction;
+    // int Mode;
+    float Linear;
+    float Quadratic;
+    // float Cutoff;
+    // float OuterCutoff;
 };
 
 layout(set = 0, binding = 0, input_attachment_index = 0) uniform subpassInput AlbedoInput;
@@ -27,62 +28,62 @@ layout(set = 1, binding = 0, std140) uniform lights {
     uint Count;
 } Lights;
 
+// layout(set = 2, binding = 0, std140) uniform material {
+//     uint Shininess;
+// } Material;
+
 layout(push_constant) uniform push_constants {
+    vec3 ViewPosition;
     int Mode;
 } PushConstants;
 
 layout(location = 0) out vec4 OutColor;
 
-vec4 calculate_diffuse_specular(vec4 Albedo, vec3 Position, vec3 Normal, vec4 Specular, vec4 SurfaceColor, vec3 DirectionToLight) {
-    // Diffuse
-    float DiffuseValue = max(dot(Normal, DirectionToLight), 0.0);
-    vec4 Diffuse = SurfaceColor * Albedo * DiffuseValue;
-
-    // // Specular
-    // vec3 ViewDirection = normalize(push_constants.view_position - Position);
-    // vec3 ReflectDirection = reflect(-DirectionToLight, Normal);
-    // float SpecularValue = pow(max(dot(ViewDirection, ReflectDirection), 0.0), material.shininess);
-    // vec4 Specular = SurfaceColor * Specular * SpecularValue;
-
-    return Diffuse/*  + Specular */;
-}
-
-float calculate_attenuation(light Light, float DistanceToLight) {
+float attenuation(light Light, float DistanceToLight) {
     // Fatt = 1.0 / (Kc + Kl ∗ d + Kq ∗ d^2)
     return 1 / (1.0 + (Light.Linear.x * DistanceToLight) + (Light.Quadratic.x * pow(DistanceToLight, 2)));
 }
 
 void main() {
-    vec4 Albedo = subpassLoad(AlbedoInput);
-    vec4 Specular = vec4(0);
-    vec3 Position = subpassLoad(PositionInput).rgb;
-    vec3 Normal = subpassLoad(NormalInput).rgb;
+    vec4 FragmentAlbedo = subpassLoad(AlbedoInput);
+    vec3 FragmentPosition = subpassLoad(PositionInput).rgb;
+    vec3 FragmentNormal = subpassLoad(NormalInput).rgb;
     switch(PushConstants.Mode) {
         case MODE_COMPOSITE: {
-            const float AMBIENT_VALUE = 0.01;
             vec4 FinalColor = vec4(0);
             for(uint LightIndex = 0; LightIndex < Lights.Count; ++LightIndex) {
-                vec4 SurfaceColor = Lights.Data[LightIndex].Color;
-                vec3 DirectionToLight = normalize(Lights.Data[LightIndex].Position.xyz - Position);
-                float DistanceToLight = distance(Lights.Data[LightIndex].Position.xyz, Position);
-                vec4 Ambient = Lights.Data[LightIndex].Color * AMBIENT_VALUE;
-                vec4 DiffuseSpecular = calculate_diffuse_specular(Albedo, Position, Normal, Specular, SurfaceColor, DirectionToLight);
-                FinalColor += (DiffuseSpecular + Ambient) * calculate_attenuation(Lights.Data[LightIndex], DistanceToLight);
+                light Light = Lights.Data[LightIndex];
+                vec3 DirectionToLight = normalize(Light.Position.xyz - FragmentPosition);
+
+                // Ambient
+                vec4 Ambient = Light.Color * Light.AmbientIntensity * FragmentAlbedo.a;
+
+                // Diffuse
+                float DiffuseValue = max(dot(FragmentNormal, DirectionToLight), 0.0);
+                vec4 Diffuse = Light.Color * FragmentAlbedo * DiffuseValue;
+
+                // Specular
+                vec3 ViewDirection = normalize(PushConstants.ViewPosition - FragmentPosition);
+                vec3 ReflectDirection = reflect(-DirectionToLight, FragmentNormal);
+                float SpecularValue = pow(max(dot(ViewDirection, ReflectDirection), 0.0), 32);//Material.Shininess);
+                vec4 Specular = Light.Color * SpecularValue;
+
+                FinalColor += (Diffuse + Specular + Ambient) * attenuation(Light, distance(Light.Position, FragmentPosition));
             }
             OutColor = FinalColor;
             break;
         }
         case MODE_ALBEDO: {
-            OutColor = Albedo;
+            OutColor = FragmentAlbedo;
             break;
         }
         case MODE_POSITION: {
-            OutColor = vec4(Position / 16, 1);
+            OutColor = vec4(FragmentPosition / 16, 1);
             OutColor.y *= -1;
             break;
         }
         case MODE_NORMAL: {
-            OutColor = vec4(Normal, 1);
+            OutColor = vec4(FragmentNormal, 1);
             OutColor.y *= -1;
             break;
         }

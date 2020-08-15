@@ -82,10 +82,12 @@ struct matrix_ubo {
 };
 
 struct light {
-    alignas(16) ctk::vec4<f32> Color;
-    alignas(16) ctk::vec3<f32> Position;
-    alignas(16) f32 Linear;
-    alignas(16) f32 Quadratic;
+    ctk::vec4<f32> Color;
+    ctk::vec3<f32> Position;
+    f32 AmbientIntensity;
+    f32 Linear;
+    f32 Quadratic;
+    char Pad[8];
 };
 
 struct entity {
