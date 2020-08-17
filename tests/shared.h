@@ -76,42 +76,12 @@ struct transform {
     ctk::vec3<f32> Scale;
 };
 
-struct matrix_ubo {
-    alignas(16) glm::mat4 ModelMatrix;
-    alignas(16) glm::mat4 ModelViewProjectionMatrix;
-};
-
-struct light {
-    ctk::vec4<f32> Color;
-    ctk::vec3<f32> Position;
-    f32 AmbientIntensity;
-    f32 Linear;
-    f32 Quadratic;
-    char Pad[8];
-};
-
-struct entity {
-    transform Transform;
-    vtk::descriptor_set *TextureDS;
-    mesh *Mesh;
-};
-
 struct camera {
     transform Transform;
     f32 FieldOfView;
     f32 Aspect;
     f32 ZNear;
     f32 ZFar;
-};
-
-struct scene {
-    static const u32 MAX_ENTITIES = 1024;
-    static const u32 MAX_LIGHTS = 16;
-    camera Camera;
-    ctk::smap<entity, MAX_ENTITIES> Entities;
-    ctk::sarray<light, MAX_LIGHTS> Lights;
-    ctk::sarray<matrix_ubo, MAX_ENTITIES> EntityMatrixUBOs;
-    ctk::sarray<matrix_ubo, MAX_LIGHTS> LightMatrixUBOs;
 };
 
 ////////////////////////////////////////////////////////////
@@ -333,13 +303,17 @@ static vulkan_instance *create_vulkan_instance(window *Window) {
     // Buffers
     vtk::buffer_info HostBufferInfo = {};
     HostBufferInfo.Size = 256 * CTK_MEGABYTE;
-    HostBufferInfo.UsageFlags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    HostBufferInfo.UsageFlags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                                VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     HostBufferInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     *HostBuffer = vtk::create_buffer(Device, &HostBufferInfo);
 
     vtk::buffer_info DeviceBufferInfo = {};
     DeviceBufferInfo.Size = 256 * CTK_MEGABYTE;
-    DeviceBufferInfo.UsageFlags = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    DeviceBufferInfo.UsageFlags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                  VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     DeviceBufferInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     VulkanInstance->DeviceBuffer = vtk::create_buffer(Device, &DeviceBufferInfo);
 
@@ -391,16 +365,6 @@ static assets *create_assets(vulkan_instance *VulkanInstance) {
     }
 
     return Assets;
-}
-
-static entity *push_entity(scene *Scene, cstr Name) {
-    ctk::push(&Scene->EntityMatrixUBOs);
-    return ctk::push(&Scene->Entities, Name);
-}
-
-static light *push_light(scene *Scene) {
-    ctk::push(&Scene->LightMatrixUBOs);
-    return ctk::push(&Scene->Lights);
 }
 
 static void update_input_state(input_state *InputState, GLFWwindow *Window) {
@@ -475,45 +439,6 @@ static glm::mat4 view_projection_matrix(camera *Camera) {
     ProjectionMatrix[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
 
     return ProjectionMatrix * ViewMatrix;
-}
-
-static void update_entity_matrixes(VkDevice LogicalDevice, vtk::region *Region, scene *Scene, glm::mat4 ViewProjectionMatrix) {
-    if(Scene->Entities.Count == 0) return;
-
-    // Entity Model Matrixes
-    for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
-        transform *EntityTransform = &Scene->Entities.Values[EntityIndex].Transform;
-        glm::mat4 ModelMatrix(1.0f);
-        ModelMatrix = glm::translate(ModelMatrix, { EntityTransform->Position.X, EntityTransform->Position.Y, EntityTransform->Position.Z });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.X), { 1.0f, 0.0f, 0.0f });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Y), { 0.0f, 1.0f, 0.0f });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
-        ModelMatrix = glm::scale(ModelMatrix, { EntityTransform->Scale.X, EntityTransform->Scale.Y, EntityTransform->Scale.Z });
-        Scene->EntityMatrixUBOs[EntityIndex].ModelMatrix = ModelMatrix;
-        Scene->EntityMatrixUBOs[EntityIndex].ModelViewProjectionMatrix = ViewProjectionMatrix * ModelMatrix;
-    }
-
-    vtk::write_to_host_region(LogicalDevice, Region, Scene->EntityMatrixUBOs.Data, ctk::byte_count(&Scene->EntityMatrixUBOs), 0);
-}
-
-static void update_light_matrixes(VkDevice LogicalDevice, vtk::region *Region, scene *Scene, glm::mat4 ViewProjectionMatrix) {
-    if(Scene->Lights.Count == 0) return;
-
-    // Model Matrixes
-    for(u32 LightIndex = 0; LightIndex < Scene->Lights.Count; ++LightIndex) {
-        ctk::vec3<f32> *LightPosition = &Scene->Lights[LightIndex].Position;
-        glm::mat4 ModelMatrix(1.0f);
-        ModelMatrix = glm::translate(ModelMatrix, { LightPosition->X, LightPosition->Y, LightPosition->Z });
-        ModelMatrix = glm::scale(ModelMatrix, { 0.25f, 0.25f, 0.25f });
-        Scene->LightMatrixUBOs[LightIndex].ModelMatrix = ModelMatrix;
-        Scene->LightMatrixUBOs[LightIndex].ModelViewProjectionMatrix = ViewProjectionMatrix * ModelMatrix;
-    }
-
-    vtk::write_to_host_region(LogicalDevice, Region, Scene->LightMatrixUBOs.Data, ctk::byte_count(&Scene->LightMatrixUBOs), 0);
-}
-
-static void update_lights(VkDevice LogicalDevice, vtk::region *Region, scene *Scene) {
-    vtk::write_to_host_region(LogicalDevice, Region, &Scene->Lights, sizeof(Scene->Lights), 0);
 }
 
 static void synchronize_current_frame(vulkan_instance *VulkanInstance, u32 SwapchainImageIndex) {

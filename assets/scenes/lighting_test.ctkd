@@ -17,15 +17,17 @@ entities {
         }
         texture brick
         mesh sibenik
+        material test
     }
     cube {
         transform {
-            position [ 1 -1 1 ]
+            position [ 1 2.5 1 ]
             rotation [ 0 0 0 ]
-            scale [ 1 1 1 ]
+            scale [ 4 4 4 ]
         }
         texture grass_cube
         mesh cube
+        material test
     }
     quad {
         transform {
@@ -35,25 +37,23 @@ entities {
         }
         texture tiles
         mesh quad
+        material test2
     }
 }
 lights [
-    {
-        color [ 1 0 0 1 ]
-        position [ 2.5 -2.5 2.5 ]
-        ambient_intensity 0.01
-        attenuation_index 3
-    }
-    {
-        color [ 0 1 1 1 ]
-        position [ 5 -3 5 ]
-        ambient_intensity 0.01
-        attenuation_index 3
-    }
+    # {
+    #     color [ 1 0 0 1 ]
+    #     position [ 2.5 -2.5 2.5 ]
+    #     attenuation_index 3
+    # }
     {
         color [ 1 1 1 1 ]
-        position [ 27 -24 24 ]
-        ambient_intensity 0.01
-        attenuation_index 8
+        position [ 5 -3 5 ]
+        attenuation_index 3
     }
+    # {
+    #     color [ 1 1 1 1 ]
+    #     position [ 27 -24 24 ]
+    #     attenuation_index 8
+    # }
 ]

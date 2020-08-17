@@ -8,19 +8,23 @@
 
 struct light {
     vec4 Color;
-    vec3 Position;
-    float AmbientIntensity;
     // vec3 Direction;
     // int Mode;
+    vec3 Position;
     float Linear;
     float Quadratic;
     // float Cutoff;
     // float OuterCutoff;
 };
 
+struct material {
+    uint ShineExponent;
+};
+
 layout(set = 0, binding = 0, input_attachment_index = 0) uniform subpassInput AlbedoInput;
 layout(set = 0, binding = 1, input_attachment_index = 1) uniform subpassInput PositionInput;
 layout(set = 0, binding = 2, input_attachment_index = 2) uniform subpassInput NormalInput;
+layout(set = 0, binding = 3, input_attachment_index = 3) uniform subpassInput MaterialIndexInput;
 
 layout(set = 1, binding = 0, std140) uniform lights {
     light Data[16];
@@ -28,9 +32,9 @@ layout(set = 1, binding = 0, std140) uniform lights {
     uint Count;
 } Lights;
 
-// layout(set = 2, binding = 0, std140) uniform material {
-//     uint Shininess;
-// } Material;
+layout(set = 2, binding = 0, std140) uniform materials {
+    material Data[16];
+} Materials;
 
 layout(push_constant) uniform push_constants {
     vec3 ViewPosition;
@@ -41,22 +45,21 @@ layout(location = 0) out vec4 OutColor;
 
 float attenuation(light Light, float DistanceToLight) {
     // Fatt = 1.0 / (Kc + Kl ∗ d + Kq ∗ d^2)
-    return 1 / (1.0 + (Light.Linear.x * DistanceToLight) + (Light.Quadratic.x * pow(DistanceToLight, 2)));
+    return 1 / (1.0 + (Light.Linear * DistanceToLight) + (Light.Quadratic * pow(DistanceToLight, 2)));
 }
 
 void main() {
     vec4 FragmentAlbedo = subpassLoad(AlbedoInput);
     vec3 FragmentPosition = subpassLoad(PositionInput).rgb;
     vec3 FragmentNormal = subpassLoad(NormalInput).rgb;
+    uint FragmentMaterialIndex = uint(subpassLoad(MaterialIndexInput).r);
     switch(PushConstants.Mode) {
         case MODE_COMPOSITE: {
-            vec4 FinalColor = vec4(0);
+            const vec4 AMBIENT = vec4(vec3(0.0), 1);
+            vec4 FinalColor = FragmentAlbedo * AMBIENT;
             for(uint LightIndex = 0; LightIndex < Lights.Count; ++LightIndex) {
                 light Light = Lights.Data[LightIndex];
                 vec3 DirectionToLight = normalize(Light.Position.xyz - FragmentPosition);
-
-                // Ambient
-                vec4 Ambient = Light.Color * Light.AmbientIntensity * FragmentAlbedo.a;
 
                 // Diffuse
                 float DiffuseValue = max(dot(FragmentNormal, DirectionToLight), 0.0);
@@ -65,10 +68,10 @@ void main() {
                 // Specular
                 vec3 ViewDirection = normalize(PushConstants.ViewPosition - FragmentPosition);
                 vec3 ReflectDirection = reflect(-DirectionToLight, FragmentNormal);
-                float SpecularValue = pow(max(dot(ViewDirection, ReflectDirection), 0.0), 32);//Material.Shininess);
-                vec4 Specular = Light.Color * SpecularValue;
+                float SpecularValue = pow(max(dot(ViewDirection, ReflectDirection), 0.0), Materials.Data[FragmentMaterialIndex].ShineExponent);
+                vec4 Specular = Light.Color * FragmentAlbedo.a * SpecularValue;
 
-                FinalColor += (Diffuse + Specular + Ambient) * attenuation(Light, distance(Light.Position, FragmentPosition));
+                FinalColor += (Diffuse + Specular) * attenuation(Light, distance(Light.Position, FragmentPosition));
             }
             OutColor = FinalColor;
             break;
