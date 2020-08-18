@@ -2,6 +2,22 @@
 
 #include "gfx/tests/shared.h"
 
+static const u32 ATTENUATION_VALUE_COUNT = 12;
+static const ctk::vec2<f32> ATTENUATION_VALUES[ATTENUATION_VALUE_COUNT] = {
+    { 0.7f,    1.8f      },
+    { 0.35f,   0.44f     },
+    { 0.22f,   0.20f     },
+    { 0.14f,   0.07f     },
+    { 0.09f,   0.032f    },
+    { 0.07f,   0.017f    },
+    { 0.045f,  0.0075f   },
+    { 0.027f,  0.0028f   },
+    { 0.022f,  0.0019f   },
+    { 0.014f,  0.0007f   },
+    { 0.007f,  0.0002f   },
+    { 0.0014f, 0.000007f },
+};
+
 struct matrix_ubo {
     alignas(16) glm::mat4 ModelMatrix;
     alignas(16) glm::mat4 ModelViewProjectionMatrix;
@@ -17,8 +33,8 @@ struct light {
 
 struct entity {
     transform Transform;
-    vtk::descriptor_set *TextureDS;
-    mesh *Mesh;
+    vtk::descriptor_set* TextureDS;
+    mesh* Mesh;
     u32 MaterialIndex;
 };
 
@@ -28,6 +44,7 @@ struct scene {
     camera Camera;
     ctk::smap<entity, MAX_ENTITIES> Entities;
     ctk::sarray<light, MAX_LIGHTS> Lights;
+    ctk::sarray<u32, MAX_LIGHTS> LightAttenuationIndexes;
     ctk::sarray<matrix_ubo, MAX_ENTITIES> EntityMatrixUBOs;
     ctk::sarray<matrix_ubo, MAX_LIGHTS> LightMatrixUBOs;
 };
@@ -98,23 +115,24 @@ struct state {
     ctk::smap<material, MAX_MATERIALS> Materials;
 };
 
-static entity *push_entity(scene *Scene, cstr Name) {
+static entity* push_entity(scene* Scene, cstr Name) {
     ctk::push(&Scene->EntityMatrixUBOs);
     return ctk::push(&Scene->Entities, Name);
 }
 
-static light *push_light(scene *Scene) {
+static light* push_light(scene* Scene, u32 AttenuationIndex) {
     ctk::push(&Scene->LightMatrixUBOs);
+    ctk::push(&Scene->LightAttenuationIndexes, AttenuationIndex);
     return ctk::push(&Scene->Lights);
 }
 
-static void update_entity_matrixes(VkDevice LogicalDevice, scene *Scene, glm::mat4 ViewProjectionMatrix, vtk::region *Region) {
+static void update_entity_matrixes(VkDevice LogicalDevice, scene* Scene, glm::mat4 ViewProjectionMatrix, vtk::region* Region) {
     if(Scene->Entities.Count == 0) return;
 
     // Entity Model Matrixes
     for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
-        transform *EntityTransform = &Scene->Entities.Values[EntityIndex].Transform;
-        matrix_ubo *EntityMatrixUBO = Scene->EntityMatrixUBOs + EntityIndex;
+        transform* EntityTransform = &Scene->Entities.Values[EntityIndex].Transform;
+        matrix_ubo* EntityMatrixUBO = Scene->EntityMatrixUBOs + EntityIndex;
         glm::mat4 ModelMatrix(1.0f);
         ModelMatrix = glm::translate(ModelMatrix, { EntityTransform->Position.X, EntityTransform->Position.Y, EntityTransform->Position.Z });
         ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.X), { 1.0f, 0.0f, 0.0f });
@@ -128,13 +146,13 @@ static void update_entity_matrixes(VkDevice LogicalDevice, scene *Scene, glm::ma
     vtk::write_to_host_region(LogicalDevice, Region, Scene->EntityMatrixUBOs.Data, ctk::byte_count(&Scene->EntityMatrixUBOs), 0);
 }
 
-static void update_light_matrixes(VkDevice LogicalDevice, scene *Scene, glm::mat4 ViewProjectionMatrix, vtk::region *Region) {
+static void update_light_matrixes(VkDevice LogicalDevice, scene* Scene, glm::mat4 ViewProjectionMatrix, vtk::region* Region) {
     if(Scene->Lights.Count == 0) return;
 
     // Model Matrixes
     for(u32 LightIndex = 0; LightIndex < Scene->Lights.Count; ++LightIndex) {
-        ctk::vec3<f32> *LightPosition = &Scene->Lights[LightIndex].Position;
-        matrix_ubo *LightMatrixUBO = Scene->LightMatrixUBOs + LightIndex;
+        ctk::vec3<f32>* LightPosition = &Scene->Lights[LightIndex].Position;
+        matrix_ubo* LightMatrixUBO = Scene->LightMatrixUBOs + LightIndex;
         glm::mat4 ModelMatrix(1.0f);
         ModelMatrix = glm::translate(ModelMatrix, { LightPosition->X, LightPosition->Y, LightPosition->Z });
         ModelMatrix = glm::scale(ModelMatrix, { 0.25f, 0.25f, 0.25f });
@@ -145,14 +163,14 @@ static void update_light_matrixes(VkDevice LogicalDevice, scene *Scene, glm::mat
     vtk::write_to_host_region(LogicalDevice, Region, Scene->LightMatrixUBOs.Data, ctk::byte_count(&Scene->LightMatrixUBOs), 0);
 }
 
-static void create_test_assets(state *State) {
-    ctk::push(&State->Materials, "test", { 2 });
+static void create_test_assets(state* State) {
+    ctk::push(&State->Materials, "test", { 32 });
     ctk::push(&State->Materials, "test2", { 256 });
 }
 
-static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, assets *Assets) {
-    vtk::device *Device = &VulkanInstance->Device;
-    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+static void create_vulkan_state(state* State, vulkan_instance* VulkanInstance, assets* Assets) {
+    vtk::device* Device = &VulkanInstance->Device;
+    vtk::swapchain* Swapchain = &VulkanInstance->Swapchain;
 
     ////////////////////////////////////////////////////////////
     /// Vertex Layout
@@ -224,7 +242,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     vtk::render_pass_info RenderPassInfo = {};
 
     // Attachments
-    vtk::attachment *AlbedoAttachment = ctk::push(&RenderPassInfo.Attachments);
+    vtk::attachment* AlbedoAttachment = ctk::push(&RenderPassInfo.Attachments);
     AlbedoAttachment->Description.format = VK_FORMAT_R8G8B8A8_UNORM;
     AlbedoAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
     AlbedoAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -235,7 +253,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     AlbedoAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     AlbedoAttachment->ClearValue = { 0, 0, 0, 0 };
 
-    vtk::attachment *PositionAttachment = ctk::push(&RenderPassInfo.Attachments);
+    vtk::attachment* PositionAttachment = ctk::push(&RenderPassInfo.Attachments);
     PositionAttachment->Description.format = VK_FORMAT_R16G16B16A16_SFLOAT;
     PositionAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
     PositionAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -246,7 +264,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     PositionAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     PositionAttachment->ClearValue = { 0, 0, 0, 0 };
 
-    vtk::attachment *NormalAttachment = ctk::push(&RenderPassInfo.Attachments);
+    vtk::attachment* NormalAttachment = ctk::push(&RenderPassInfo.Attachments);
     NormalAttachment->Description.format = VK_FORMAT_R16G16B16A16_SFLOAT;
     NormalAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
     NormalAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -257,7 +275,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     NormalAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     NormalAttachment->ClearValue = { 0, 0, 0, 0 };
 
-    vtk::attachment *DepthAttachment = ctk::push(&RenderPassInfo.Attachments);
+    vtk::attachment* DepthAttachment = ctk::push(&RenderPassInfo.Attachments);
     DepthAttachment->Description.format = DepthImageInfo.Format;
     DepthAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
     DepthAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -268,7 +286,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     DepthAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     DepthAttachment->ClearValue = { 1.0f, 0 };
 
-    vtk::attachment *SwapchainAttachment = ctk::push(&RenderPassInfo.Attachments);
+    vtk::attachment* SwapchainAttachment = ctk::push(&RenderPassInfo.Attachments);
     SwapchainAttachment->Description.format = Swapchain->ImageFormat;
     SwapchainAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
     SwapchainAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -279,7 +297,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     SwapchainAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     SwapchainAttachment->ClearValue = { 0, 0, 0, 0 };
 
-    vtk::attachment *MaterialIndexAttachment = ctk::push(&RenderPassInfo.Attachments);
+    vtk::attachment* MaterialIndexAttachment = ctk::push(&RenderPassInfo.Attachments);
     MaterialIndexAttachment->Description.format = VK_FORMAT_R8_UINT;
     MaterialIndexAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
     MaterialIndexAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -291,21 +309,21 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     MaterialIndexAttachment->ClearValue = { 0 };
 
     // Subpasses
-    vtk::subpass *DeferredSubpass = ctk::push(&RenderPassInfo.Subpasses);
+    vtk::subpass* DeferredSubpass = ctk::push(&RenderPassInfo.Subpasses);
     ctk::push(&DeferredSubpass->ColorAttachmentReferences, { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
     ctk::push(&DeferredSubpass->ColorAttachmentReferences, { 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
     ctk::push(&DeferredSubpass->ColorAttachmentReferences, { 2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
     ctk::push(&DeferredSubpass->ColorAttachmentReferences, { 5, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
     ctk::set(&DeferredSubpass->DepthAttachmentReference, { 3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
 
-    vtk::subpass *LightingSubpass = ctk::push(&RenderPassInfo.Subpasses);
+    vtk::subpass* LightingSubpass = ctk::push(&RenderPassInfo.Subpasses);
     ctk::push(&LightingSubpass->InputAttachmentReferences, { 0, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
     ctk::push(&LightingSubpass->InputAttachmentReferences, { 1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
     ctk::push(&LightingSubpass->InputAttachmentReferences, { 2, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
     ctk::push(&LightingSubpass->InputAttachmentReferences, { 5, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
     ctk::push(&LightingSubpass->ColorAttachmentReferences, { 4, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
 
-    vtk::subpass *DirectSubpass = ctk::push(&RenderPassInfo.Subpasses);
+    vtk::subpass* DirectSubpass = ctk::push(&RenderPassInfo.Subpasses);
     ctk::push(&DirectSubpass->ColorAttachmentReferences, { 4, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
     ctk::set(&DirectSubpass->DepthAttachmentReference, { 3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
 
@@ -337,7 +355,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
 
     // Framebuffer Infos
     CTK_ITERATE(Swapchain->Images.Count) {
-        vtk::framebuffer_info *FramebufferInfo = ctk::push(&RenderPassInfo.FramebufferInfos);
+        vtk::framebuffer_info* FramebufferInfo = ctk::push(&RenderPassInfo.FramebufferInfos);
         ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.Albedo.View);
         ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.Position.View);
         ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.Normal.View);
@@ -353,19 +371,17 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     ////////////////////////////////////////////////////////////
     /// Descriptor Sets
     ////////////////////////////////////////////////////////////
-    vtk::descriptor_set *EntityMatrixesDS = &State->DescriptorSets.EntityMatrixes;
-    vtk::descriptor_set *LightMatrixesDS = &State->DescriptorSets.LightMatrixes;
-    vtk::descriptor_set *LightsDS = &State->DescriptorSets.Lights;
-    vtk::descriptor_set *InputAttachmentsDS = &State->DescriptorSets.InputAttachments;
-    vtk::descriptor_set *MaterialsDS = &State->DescriptorSets.Materials;
+    vtk::descriptor_set* EntityMatrixesDS = &State->DescriptorSets.EntityMatrixes;
+    vtk::descriptor_set* LightMatrixesDS = &State->DescriptorSets.LightMatrixes;
+    vtk::descriptor_set* LightsDS = &State->DescriptorSets.Lights;
+    vtk::descriptor_set* InputAttachmentsDS = &State->DescriptorSets.InputAttachments;
+    vtk::descriptor_set* MaterialsDS = &State->DescriptorSets.Materials;
 
     // Pool
     ctk::sarray<VkDescriptorPoolSize, 8> DescriptorPoolSizes = {};
-
-    // One for each uniform buffer x swapchain image.
-    ctk::push(&DescriptorPoolSizes, { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 8 });
-    ctk::push(&DescriptorPoolSizes, { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4 });
-    ctk::push(&DescriptorPoolSizes, { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 4 });
+    ctk::push(&DescriptorPoolSizes, { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 16 });
+    ctk::push(&DescriptorPoolSizes, { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16 });
+    ctk::push(&DescriptorPoolSizes, { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 16 });
     ctk::push(&DescriptorPoolSizes, { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 });
     VkDescriptorPoolCreateInfo DescriptorPoolCreateInfo = {};
     DescriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -496,7 +512,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
 
     // Textures
     CTK_ITERATE(Assets->Textures.Count) {
-        vtk::descriptor_set *TexturesDS = ctk::push(&State->DescriptorSets.Textures, Assets->Textures.Keys[IterationIndex]);
+        vtk::descriptor_set* TexturesDS = ctk::push(&State->DescriptorSets.Textures, Assets->Textures.Keys[IterationIndex]);
         TexturesDS->Instances.Count = 1;
 
         VkDescriptorSetAllocateInfo TexturesAllocateInfo = {};
@@ -525,14 +541,14 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
 
     // EntityMatrixes
     CTK_ITERATE(EntityMatrixesDS->Instances.Count) {
-        vtk::region *EntityMatrixesRegion = State->UniformBuffers.EntityMatrixes.Regions + IterationIndex;
+        vtk::region* EntityMatrixesRegion = State->UniformBuffers.EntityMatrixes.Regions + IterationIndex;
 
-        VkDescriptorBufferInfo *EntityMatrixDescriptorBufferInfo = ctk::push(&DescriptorBufferInfos);
+        VkDescriptorBufferInfo* EntityMatrixDescriptorBufferInfo = ctk::push(&DescriptorBufferInfos);
         EntityMatrixDescriptorBufferInfo->buffer = EntityMatrixesRegion->Buffer->Handle;
         EntityMatrixDescriptorBufferInfo->offset = EntityMatrixesRegion->Offset;
         EntityMatrixDescriptorBufferInfo->range = EntityMatrixesRegion->Size;
 
-        VkWriteDescriptorSet *EntityMatrixesWrite = ctk::push(&WriteDescriptorSets);
+        VkWriteDescriptorSet* EntityMatrixesWrite = ctk::push(&WriteDescriptorSets);
         EntityMatrixesWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         EntityMatrixesWrite->dstSet = EntityMatrixesDS->Instances[IterationIndex];
         EntityMatrixesWrite->dstBinding = 0;
@@ -544,14 +560,14 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
 
     // LightMatrixes
     CTK_ITERATE(LightMatrixesDS->Instances.Count) {
-        vtk::region *LightMatrixesRegion = State->UniformBuffers.LightMatrixes.Regions + IterationIndex;
+        vtk::region* LightMatrixesRegion = State->UniformBuffers.LightMatrixes.Regions + IterationIndex;
 
-        VkDescriptorBufferInfo *LightMatrixDescriptorBufferInfo = ctk::push(&DescriptorBufferInfos);
+        VkDescriptorBufferInfo* LightMatrixDescriptorBufferInfo = ctk::push(&DescriptorBufferInfos);
         LightMatrixDescriptorBufferInfo->buffer = LightMatrixesRegion->Buffer->Handle;
         LightMatrixDescriptorBufferInfo->offset = LightMatrixesRegion->Offset;
         LightMatrixDescriptorBufferInfo->range = LightMatrixesRegion->Size;
 
-        VkWriteDescriptorSet *LightMatrixesWrite = ctk::push(&WriteDescriptorSets);
+        VkWriteDescriptorSet* LightMatrixesWrite = ctk::push(&WriteDescriptorSets);
         LightMatrixesWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         LightMatrixesWrite->dstSet = LightMatrixesDS->Instances[IterationIndex];
         LightMatrixesWrite->dstBinding = 0;
@@ -563,14 +579,14 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
 
     // Lights
     CTK_ITERATE(LightsDS->Instances.Count) {
-        vtk::region *LightsRegion = State->UniformBuffers.Lights.Regions + IterationIndex;
+        vtk::region* LightsRegion = State->UniformBuffers.Lights.Regions + IterationIndex;
 
-        VkDescriptorBufferInfo *LightsDescriptorBufferInfo = ctk::push(&DescriptorBufferInfos);
+        VkDescriptorBufferInfo* LightsDescriptorBufferInfo = ctk::push(&DescriptorBufferInfos);
         LightsDescriptorBufferInfo->buffer = LightsRegion->Buffer->Handle;
         LightsDescriptorBufferInfo->offset = LightsRegion->Offset;
         LightsDescriptorBufferInfo->range = LightsRegion->Size;
 
-        VkWriteDescriptorSet *LightsWrite = ctk::push(&WriteDescriptorSets);
+        VkWriteDescriptorSet* LightsWrite = ctk::push(&WriteDescriptorSets);
         LightsWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         LightsWrite->dstSet = LightsDS->Instances[IterationIndex];
         LightsWrite->dstBinding = 0;
@@ -581,12 +597,12 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     }
 
     // InputAttachments
-    VkDescriptorImageInfo *AlbedoInputDescriptorImageInfo = ctk::push(&DescriptorImageInfos);
+    VkDescriptorImageInfo* AlbedoInputDescriptorImageInfo = ctk::push(&DescriptorImageInfos);
     AlbedoInputDescriptorImageInfo->sampler = VK_NULL_HANDLE;
     AlbedoInputDescriptorImageInfo->imageView = State->AttachmentImages.Albedo.View;
     AlbedoInputDescriptorImageInfo->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet *AlbedoInputImageWrite = ctk::push(&WriteDescriptorSets);
+    VkWriteDescriptorSet* AlbedoInputImageWrite = ctk::push(&WriteDescriptorSets);
     AlbedoInputImageWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     AlbedoInputImageWrite->dstSet = InputAttachmentsDS->Instances[0];
     AlbedoInputImageWrite->dstBinding = 0;
@@ -595,12 +611,12 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     AlbedoInputImageWrite->descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
     AlbedoInputImageWrite->pImageInfo = AlbedoInputDescriptorImageInfo;
 
-    VkDescriptorImageInfo *PositionInputDescriptorImageInfo = ctk::push(&DescriptorImageInfos);
+    VkDescriptorImageInfo* PositionInputDescriptorImageInfo = ctk::push(&DescriptorImageInfos);
     PositionInputDescriptorImageInfo->sampler = VK_NULL_HANDLE;
     PositionInputDescriptorImageInfo->imageView = State->AttachmentImages.Position.View;
     PositionInputDescriptorImageInfo->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet *PositionInputImageWrite = ctk::push(&WriteDescriptorSets);
+    VkWriteDescriptorSet* PositionInputImageWrite = ctk::push(&WriteDescriptorSets);
     PositionInputImageWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     PositionInputImageWrite->dstSet = InputAttachmentsDS->Instances[0];
     PositionInputImageWrite->dstBinding = 1;
@@ -609,12 +625,12 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     PositionInputImageWrite->descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
     PositionInputImageWrite->pImageInfo = PositionInputDescriptorImageInfo;
 
-    VkDescriptorImageInfo *NormalInputDescriptorImageInfo = ctk::push(&DescriptorImageInfos);
+    VkDescriptorImageInfo* NormalInputDescriptorImageInfo = ctk::push(&DescriptorImageInfos);
     NormalInputDescriptorImageInfo->sampler = VK_NULL_HANDLE;
     NormalInputDescriptorImageInfo->imageView = State->AttachmentImages.Normal.View;
     NormalInputDescriptorImageInfo->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet *NormalInputImageWrite = ctk::push(&WriteDescriptorSets);
+    VkWriteDescriptorSet* NormalInputImageWrite = ctk::push(&WriteDescriptorSets);
     NormalInputImageWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     NormalInputImageWrite->dstSet = InputAttachmentsDS->Instances[0];
     NormalInputImageWrite->dstBinding = 2;
@@ -623,12 +639,12 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     NormalInputImageWrite->descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
     NormalInputImageWrite->pImageInfo = NormalInputDescriptorImageInfo;
 
-    VkDescriptorImageInfo *MaterialIndexInputDescriptorImageInfo = ctk::push(&DescriptorImageInfos);
+    VkDescriptorImageInfo* MaterialIndexInputDescriptorImageInfo = ctk::push(&DescriptorImageInfos);
     MaterialIndexInputDescriptorImageInfo->sampler = VK_NULL_HANDLE;
     MaterialIndexInputDescriptorImageInfo->imageView = State->AttachmentImages.MaterialIndex.View;
     MaterialIndexInputDescriptorImageInfo->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet *MaterialIndexInputImageWrite = ctk::push(&WriteDescriptorSets);
+    VkWriteDescriptorSet* MaterialIndexInputImageWrite = ctk::push(&WriteDescriptorSets);
     MaterialIndexInputImageWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     MaterialIndexInputImageWrite->dstSet = InputAttachmentsDS->Instances[0];
     MaterialIndexInputImageWrite->dstBinding = 3;
@@ -639,15 +655,15 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
 
     // Textures
     CTK_ITERATE(Assets->Textures.Count) {
-        vtk::texture *Texture = Assets->Textures.Values + IterationIndex;
+        vtk::texture* Texture = Assets->Textures.Values + IterationIndex;
 
-        VkDescriptorImageInfo *TextureDescriptorImageInfo = ctk::push(&DescriptorImageInfos);
+        VkDescriptorImageInfo* TextureDescriptorImageInfo = ctk::push(&DescriptorImageInfos);
         TextureDescriptorImageInfo->sampler = Texture->Sampler;
         TextureDescriptorImageInfo->imageView = Texture->Image.View;
         TextureDescriptorImageInfo->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-        vtk::descriptor_set *TexturesDS = ctk::at(&State->DescriptorSets.Textures, Assets->Textures.Keys[IterationIndex]);
-        VkWriteDescriptorSet *TextureImageWrite = ctk::push(&WriteDescriptorSets);
+        vtk::descriptor_set* TexturesDS = ctk::at(&State->DescriptorSets.Textures, Assets->Textures.Keys[IterationIndex]);
+        VkWriteDescriptorSet* TextureImageWrite = ctk::push(&WriteDescriptorSets);
         TextureImageWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         TextureImageWrite->dstSet = TexturesDS->Instances[0];
         TextureImageWrite->dstBinding = 0;
@@ -658,14 +674,14 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     }
 
     // Materials
-    vtk::region *MaterialsRegion = State->UniformBuffers.Materials.Regions + 0;
+    vtk::region* MaterialsRegion = State->UniformBuffers.Materials.Regions + 0;
 
-    VkDescriptorBufferInfo *MaterialsDescriptorBufferInfo = ctk::push(&DescriptorBufferInfos);
+    VkDescriptorBufferInfo* MaterialsDescriptorBufferInfo = ctk::push(&DescriptorBufferInfos);
     MaterialsDescriptorBufferInfo->buffer = MaterialsRegion->Buffer->Handle;
     MaterialsDescriptorBufferInfo->offset = MaterialsRegion->Offset;
     MaterialsDescriptorBufferInfo->range = MaterialsRegion->Size;
 
-    VkWriteDescriptorSet *MaterialsWrite = ctk::push(&WriteDescriptorSets);
+    VkWriteDescriptorSet* MaterialsWrite = ctk::push(&WriteDescriptorSets);
     MaterialsWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     MaterialsWrite->dstSet = MaterialsDS->Instances[0];
     MaterialsWrite->dstBinding = 0;
@@ -730,13 +746,20 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     State->GraphicsPipelines.UnlitColor = vtk::create_graphics_pipeline(Device->Logical, &State->RenderPass, 2, &UnlitColorGPInfo);
 }
 
-static void create_scene(state *State, assets *Assets, vulkan_instance *VulkanInstance) {
-    scene *Scene = &State->Scene;
-    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+static void set_attenuation_values(light* Light, u32 AttenuationIndex) {
+    CTK_ASSERT(AttenuationIndex < ATTENUATION_VALUE_COUNT);
+    auto AttenuationValues = ATTENUATION_VALUES + AttenuationIndex;
+    Light->Linear = AttenuationValues->X;
+    Light->Quadratic = AttenuationValues->Y;
+}
+
+static void create_scene(state* State, assets* Assets, vulkan_instance* VulkanInstance) {
+    scene* Scene = &State->Scene;
+    vtk::swapchain* Swapchain = &VulkanInstance->Swapchain;
     ctk::data SceneData = ctk::load_data("assets/scenes/lighting_test.ctkd");
 
     // Camera
-    ctk::data *CameraData = ctk::at(&SceneData, "camera");
+    ctk::data* CameraData = ctk::at(&SceneData, "camera");
     Scene->Camera.Transform = load_transform(ctk::at(CameraData, "transform"));
     Scene->Camera.FieldOfView = ctk::to_f32(CameraData, "field_of_view");
     Scene->Camera.Aspect = Swapchain->Extent.width / (f32)Swapchain->Extent.height;
@@ -744,10 +767,10 @@ static void create_scene(state *State, assets *Assets, vulkan_instance *VulkanIn
     Scene->Camera.ZFar = ctk::to_f32(CameraData, "z_far");
 
     // EntityMatrixes
-    ctk::data *EntityMap = ctk::at(&SceneData, "entities");
+    ctk::data* EntityMap = ctk::at(&SceneData, "entities");
     for(u32 EntityIndex = 0; EntityIndex < EntityMap->Children.Count; ++EntityIndex) {
-        ctk::data *EntityData = ctk::at(EntityMap, EntityIndex);
-        entity *Entity = push_entity(Scene, EntityData->Key.Data);
+        ctk::data* EntityData = ctk::at(EntityMap, EntityIndex);
+        entity* Entity = push_entity(Scene, EntityData->Key.Data);
         Entity->Transform = load_transform(ctk::at(EntityData, "transform"));
         Entity->TextureDS = ctk::at(&State->DescriptorSets.Textures, ctk::to_cstr(EntityData, "texture"));
         Entity->Mesh = ctk::at(&Assets->Meshes, ctk::to_cstr(EntityData, "mesh"));
@@ -755,69 +778,64 @@ static void create_scene(state *State, assets *Assets, vulkan_instance *VulkanIn
     }
 
     // Lights
-    static const ctk::vec2<f32> ATTENUATION_VALUES[] = {
-        { 0.7f,    1.8f      },
-        { 0.35f,   0.44f     },
-        { 0.22f,   0.20f     },
-        { 0.14f,   0.07f     },
-        { 0.09f,   0.032f    },
-        { 0.07f,   0.017f    },
-        { 0.045f,  0.0075f   },
-        { 0.027f,  0.0028f   },
-        { 0.022f,  0.0019f   },
-        { 0.014f,  0.0007f   },
-        { 0.007f,  0.0002f   },
-        { 0.0014f, 0.000007f },
-    };
-    ctk::data *LightArray = ctk::at(&SceneData, "lights");
+    ctk::data* LightArray = ctk::at(&SceneData, "lights");
     for(u32 LightIndex = 0; LightIndex < LightArray->Children.Count; ++LightIndex) {
-        ctk::data *LightData = ctk::at(LightArray, LightIndex);
-        light *Light = push_light(Scene);
+        ctk::data* LightData = ctk::at(LightArray, LightIndex);
+        u32 AttenuationIndex = ctk::to_u32(LightData, "attenuation_index");
+        light* Light = push_light(Scene, AttenuationIndex);
         Light->Color = load_vec4(ctk::at(LightData, "color"));
         Light->Position = load_vec3(ctk::at(LightData, "position"));
-        auto AttenuationValues = ATTENUATION_VALUES + ctk::to_u32(LightData, "attenuation_index");
-        Light->Linear = AttenuationValues->X;
-        Light->Quadratic = AttenuationValues->Y;
+        set_attenuation_values(Light, AttenuationIndex);
     }
 
     // Cleanup
     ctk::_free(&SceneData);
 }
 
-static state *create_state(vulkan_instance *VulkanInstance, assets *Assets) {
+static state* create_state(vulkan_instance* VulkanInstance, assets* Assets) {
     auto State = ctk::allocate<state>();
     *State = {};
     create_test_assets(State);
     create_vulkan_state(State, VulkanInstance, Assets);
     create_scene(State, Assets, VulkanInstance);
-
     return State;
 }
 
-static void record_render_command_buffers(state *State, vulkan_instance *VulkanInstance, assets *Assets, u32 SwapchainImageIndex) {
-    vtk::device *Device = &VulkanInstance->Device;
-    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+static void draw_ui(scene *Scene) {
+    CTK_ITERATE(Scene->Lights.Count) {
+        u32* AttenuationIndex = Scene->LightAttenuationIndexes + IterationIndex;
+        char Buffer[256] = {};
+        sprintf(Buffer, "light %u attenuation index", IterationIndex);
+        ImGui::SliderInt(Buffer, (s32*)AttenuationIndex, 0, ATTENUATION_VALUE_COUNT - 1);
+        set_attenuation_values(Scene->Lights + IterationIndex, *AttenuationIndex);
+    }
+}
 
-    scene *Scene = &State->Scene;
-    vtk::render_pass *RenderPass = &State->RenderPass;
+static void record_render_command_buffer(vulkan_instance* VulkanInstance, assets* Assets, state* State, u32 SwapchainImageIndex) {
+    vtk::device* Device = &VulkanInstance->Device;
+    vtk::swapchain* Swapchain = &VulkanInstance->Swapchain;
 
-    VkRect2D RenderArea = {};
-    RenderArea.offset.x = 0;
-    RenderArea.offset.y = 0;
-    RenderArea.extent = Swapchain->Extent;
+    scene* Scene = &State->Scene;
+    vtk::render_pass* RenderPass = &State->RenderPass;
 
     VkCommandBufferBeginInfo CommandBufferBeginInfo = {};
     CommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     CommandBufferBeginInfo.flags = 0;
     CommandBufferBeginInfo.pInheritanceInfo = NULL;
 
-    VkCommandBuffer CommandBuffer = *ctk::at(&RenderPass->CommandBuffers, SwapchainImageIndex);
+    VkCommandBuffer CommandBuffer = RenderPass->CommandBuffers[SwapchainImageIndex];
     vtk::validate_vk_result(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
                             "vkBeginCommandBuffer", "failed to begin recording command buffer");
+
+    VkRect2D RenderArea = {};
+    RenderArea.offset.x = 0;
+    RenderArea.offset.y = 0;
+    RenderArea.extent = Swapchain->Extent;
+
     VkRenderPassBeginInfo RenderPassBeginInfo = {};
     RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     RenderPassBeginInfo.renderPass = RenderPass->Handle;
-    RenderPassBeginInfo.framebuffer = *ctk::at(&RenderPass->Framebuffers, SwapchainImageIndex);
+    RenderPassBeginInfo.framebuffer = RenderPass->Framebuffers[SwapchainImageIndex];
     RenderPassBeginInfo.renderArea = RenderArea;
     RenderPassBeginInfo.clearValueCount = RenderPass->ClearValues.Count;
     RenderPassBeginInfo.pClearValues = RenderPass->ClearValues.Data;
@@ -825,12 +843,12 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
     vkCmdBeginRenderPass(CommandBuffer, &RenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
         // Deferred Stage
         {
-            vtk::graphics_pipeline *DeferredGP = &State->GraphicsPipelines.Deferred;
-            vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.EntityMatrixes };
+            vtk::graphics_pipeline* DeferredGP = &State->GraphicsPipelines.Deferred;
+            vtk::descriptor_set* DescriptorSets[] = { &State->DescriptorSets.EntityMatrixes };
             for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
-                entity *Entity = Scene->Entities.Values + EntityIndex;
-                VkDescriptorSet *TextureDS = Entity->TextureDS->Instances + 0;
-                mesh *Mesh = Entity->Mesh;
+                entity* Entity = Scene->Entities.Values + EntityIndex;
+                VkDescriptorSet* TextureDS = Entity->TextureDS->Instances + 0;
+                mesh* Mesh = Entity->Mesh;
 
                 vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DeferredGP->Handle);
                 vtk::bind_descriptor_sets(CommandBuffer, DeferredGP->Layout, 0, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
@@ -849,8 +867,8 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
 
         // Lighting Stage
         {
-            vtk::graphics_pipeline *LightingGP = &State->GraphicsPipelines.Lighting;
-            mesh *FullscreenPlane = ctk::at(&Assets->Meshes, "fullscreen_plane");
+            vtk::graphics_pipeline* LightingGP = &State->GraphicsPipelines.Lighting;
+            mesh* FullscreenPlane = ctk::at(&Assets->Meshes, "fullscreen_plane");
             VkDescriptorSet DescriptorSets[] = {
                 State->DescriptorSets.InputAttachments.Instances[0],
                 State->DescriptorSets.Lights.Instances[SwapchainImageIndex],
@@ -878,9 +896,9 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
         // Direct Stage
         {
             // Draw Light Diamonds
-            vtk::graphics_pipeline *UnlitColorGP = &State->GraphicsPipelines.UnlitColor;
-            mesh *LightDiamond = ctk::at(&Assets->Meshes, "light_diamond");
-            vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.LightMatrixes };
+            vtk::graphics_pipeline* UnlitColorGP = &State->GraphicsPipelines.UnlitColor;
+            mesh* LightDiamond = ctk::at(&Assets->Meshes, "light_diamond");
+            vtk::descriptor_set* DescriptorSets[] = { &State->DescriptorSets.LightMatrixes };
             vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, UnlitColorGP->Handle);
 
             // Point Lights
@@ -900,8 +918,8 @@ static void record_render_command_buffers(state *State, vulkan_instance *VulkanI
     vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
 }
 
-static void update_scene(VkDevice LogicalDevice, state *State, input_state *InputState, u32 SwapchainImageIndex) {
-    scene *Scene = &State->Scene;
+static void update_scene(VkDevice LogicalDevice, input_state* InputState, state* State, u32 SwapchainImageIndex) {
+    scene* Scene = &State->Scene;
     glm::mat4 ViewProjectionMatrix = view_projection_matrix(&Scene->Camera);
     update_entity_matrixes(LogicalDevice, Scene, ViewProjectionMatrix, State->UniformBuffers.EntityMatrixes.Regions + SwapchainImageIndex);
     update_light_matrixes(LogicalDevice, Scene, ViewProjectionMatrix, State->UniformBuffers.LightMatrixes.Regions + SwapchainImageIndex);
@@ -911,10 +929,11 @@ static void update_scene(VkDevice LogicalDevice, state *State, input_state *Inpu
 
 static void test_main() {
     input_state InputState = {};
-    window *Window = create_window(&InputState);
-    vulkan_instance *VulkanInstance = create_vulkan_instance(Window);
-    assets *Assets = create_assets(VulkanInstance);
-    state *State = create_state(VulkanInstance, Assets);
+    window* Window = create_window(&InputState);
+    vulkan_instance* VulkanInstance = create_vulkan_instance(Window);
+    assets* Assets = create_assets(VulkanInstance);
+    state* State = create_state(VulkanInstance, Assets);
+    ui* UI = create_ui(Window, VulkanInstance);
     while(!glfwWindowShouldClose(Window->Handle)) {
         // Check if window should close.
         glfwPollEvents();
@@ -932,10 +951,14 @@ static void test_main() {
 
         // Process frame.
         u32 SwapchainImageIndex = aquire_next_swapchain_image_index(VulkanInstance);
-        record_render_command_buffers(State, VulkanInstance, Assets, SwapchainImageIndex);
-        update_scene(VulkanInstance->Device.Logical, State, &InputState, SwapchainImageIndex);
+        record_render_command_buffer(VulkanInstance, Assets, State, SwapchainImageIndex);
+        ui_new_frame();
+        draw_ui(&State->Scene);
+        record_ui_command_buffer(VulkanInstance, UI, SwapchainImageIndex);
+        update_scene(VulkanInstance->Device.Logical, &InputState, State, SwapchainImageIndex);
         synchronize_current_frame(VulkanInstance, SwapchainImageIndex);
-        submit_render_pass(VulkanInstance, &State->RenderPass, SwapchainImageIndex);
+        vtk::render_pass* RenderPasses[] = { &State->RenderPass, &UI->RenderPass };
+        submit_render_passes(VulkanInstance, RenderPasses, CTK_ARRAY_COUNT(RenderPasses), SwapchainImageIndex);
         cycle_frame(VulkanInstance);
         Sleep(1);
     }

@@ -68,8 +68,8 @@ void main() {
                 // Specular
                 vec3 ViewDirection = normalize(PushConstants.ViewPosition - FragmentPosition);
                 vec3 ReflectDirection = reflect(-DirectionToLight, FragmentNormal);
-                float SpecularValue = pow(max(dot(ViewDirection, ReflectDirection), 0.0), Materials.Data[FragmentMaterialIndex].ShineExponent);
-                vec4 Specular = Light.Color * FragmentAlbedo.a * SpecularValue;
+                float SpecularValue = pow(max(dot(ViewDirection, ReflectDirection), 0.0), 256);
+                vec4 Specular = Light.Color * SpecularValue;
 
                 FinalColor += (Diffuse + Specular) * attenuation(Light, distance(Light.Position, FragmentPosition));
             }
