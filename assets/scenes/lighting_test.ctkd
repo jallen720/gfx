@@ -42,19 +42,19 @@ entities {
 }
 lights [
     # {
+    #     transform { position [ 2.5 -2.5 2.5 ] }
     #     color [ 1 0 0 1 ]
-    #     position [ 2.5 -2.5 2.5 ]
     #     attenuation_index 3
     # }
     {
+        transform { position [ 5 -3 5 ] }
         color [ 1 1 1 1 ]
-        position [ 5 -3 5 ]
         attenuation_index 3
         intensity 0.5
     }
     # {
+    #     transform { position [ 27 -24 24 ] }
     #     color [ 1 1 1 1 ]
-    #     position [ 27 -24 24 ]
     #     attenuation_index 8
     # }
 ]

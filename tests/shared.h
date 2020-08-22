@@ -132,14 +132,21 @@ static ctk::vec4<f32> load_vec4(ctk::data* Data) {
     return { ctk::to_f32(Data, 0u), ctk::to_f32(Data, 1u), ctk::to_f32(Data, 2u), ctk::to_f32(Data, 3u) };
 }
 
+static transform default_transform() {
+    return { {}, {}, { 1, 1, 1 } };
+}
+
 static transform load_transform(ctk::data* Data) {
-    transform Transform = {};
-    if(Data->Children.Count == 0) {
-        Transform.Scale = { 1, 1, 1 };
-    } else {
-        Transform.Position = load_vec3(ctk::at(Data, "position"));
-        Transform.Rotation = load_vec3(ctk::at(Data, "rotation"));
-        Transform.Scale = load_vec3(ctk::at(Data, "scale"));
+    transform Transform = default_transform();
+    ctk::data* ChildData = NULL;
+    if(ChildData = ctk::find(Data, "position")) {
+        Transform.Position = load_vec3(ChildData);
+    }
+    if(ChildData = ctk::find(Data, "rotation")) {
+        Transform.Rotation = load_vec3(ChildData);
+    }
+    if(ChildData = ctk::find(Data, "scale")) {
+        Transform.Scale = load_vec3(ChildData);
     }
     return Transform;
 }

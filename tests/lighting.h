@@ -46,6 +46,7 @@ struct scene {
     ctk::smap<entity, MAX_ENTITIES> Entities;
     ctk::sarray<light, MAX_LIGHTS> Lights;
     ctk::sarray<u32, MAX_LIGHTS> LightAttenuationIndexes;
+    ctk::sarray<transform, MAX_LIGHTS> LightTransforms;
     ctk::sarray<matrix_ubo, MAX_ENTITIES> EntityMatrixUBOs;
     ctk::sarray<matrix_ubo, MAX_LIGHTS> LightMatrixUBOs;
 };
@@ -62,15 +63,16 @@ struct material {
 
 struct control_state {
     enum {
-        MODE_CAMERA,
         MODE_ENTITY,
+        MODE_LIGHT,
     } Mode;
     enum {
-        ENTITY_MODE_TRANSLATE,
-        ENTITY_MODE_ROTATE,
-        ENTITY_MODE_SCALE,
-    } EntityMode;
+        TRANSFORM_TRANSLATE,
+        TRANSFORM_ROTATE,
+        TRANSFORM_SCALE,
+    } TransformMode;
     u32 EntityIndex;
+    u32 LightIndex;
 };
 
 struct state {
@@ -135,47 +137,11 @@ static entity* push_entity(scene* Scene, cstr Name) {
     return ctk::push(&Scene->Entities, Name);
 }
 
-static light* push_light(scene* Scene, u32 AttenuationIndex) {
+static light* push_light(scene* Scene, u32 AttenuationIndex, transform** LightTransform) {
     ctk::push(&Scene->LightMatrixUBOs);
     ctk::push(&Scene->LightAttenuationIndexes, AttenuationIndex);
+    *LightTransform = ctk::push(&Scene->LightTransforms, default_transform());
     return ctk::push(&Scene->Lights);
-}
-
-static void update_entity_matrixes(VkDevice LogicalDevice, scene* Scene, glm::mat4 ViewProjectionMatrix, vtk::region* Region) {
-    if(Scene->Entities.Count == 0) return;
-
-    // Entity Model Matrixes
-    for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
-        transform* EntityTransform = &Scene->Entities.Values[EntityIndex].Transform;
-        matrix_ubo* EntityMatrixUBO = Scene->EntityMatrixUBOs + EntityIndex;
-        glm::mat4 ModelMatrix(1.0f);
-        ModelMatrix = glm::translate(ModelMatrix, { EntityTransform->Position.X, EntityTransform->Position.Y, EntityTransform->Position.Z });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.X), { 1.0f, 0.0f, 0.0f });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Y), { 0.0f, 1.0f, 0.0f });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
-        ModelMatrix = glm::scale(ModelMatrix, { EntityTransform->Scale.X, EntityTransform->Scale.Y, EntityTransform->Scale.Z });
-        EntityMatrixUBO->ModelMatrix = ModelMatrix;
-        EntityMatrixUBO->ModelViewProjectionMatrix = ViewProjectionMatrix * ModelMatrix;
-    }
-
-    vtk::write_to_host_region(LogicalDevice, Region, Scene->EntityMatrixUBOs.Data, ctk::byte_count(&Scene->EntityMatrixUBOs), 0);
-}
-
-static void update_light_matrixes(VkDevice LogicalDevice, scene* Scene, glm::mat4 ViewProjectionMatrix, vtk::region* Region) {
-    if(Scene->Lights.Count == 0) return;
-
-    // Model Matrixes
-    for(u32 LightIndex = 0; LightIndex < Scene->Lights.Count; ++LightIndex) {
-        ctk::vec3<f32>* LightPosition = &Scene->Lights[LightIndex].Position;
-        matrix_ubo* LightMatrixUBO = Scene->LightMatrixUBOs + LightIndex;
-        glm::mat4 ModelMatrix(1.0f);
-        ModelMatrix = glm::translate(ModelMatrix, { LightPosition->X, LightPosition->Y, LightPosition->Z });
-        ModelMatrix = glm::scale(ModelMatrix, { 0.25f, 0.25f, 0.25f });
-        LightMatrixUBO->ModelMatrix = ModelMatrix;
-        LightMatrixUBO->ModelViewProjectionMatrix = ViewProjectionMatrix * ModelMatrix;
-    }
-
-    vtk::write_to_host_region(LogicalDevice, Region, Scene->LightMatrixUBOs.Data, ctk::byte_count(&Scene->LightMatrixUBOs), 0);
 }
 
 static void create_test_assets(state* State) {
@@ -795,11 +761,12 @@ static void create_scene(state* State, assets* Assets, vulkan_instance* VulkanIn
     for(u32 LightIndex = 0; LightIndex < LightArray->Children.Count; ++LightIndex) {
         ctk::data* LightData = ctk::at(LightArray, LightIndex);
         u32 AttenuationIndex = ctk::to_u32(LightData, "attenuation_index");
-        light* Light = push_light(Scene, AttenuationIndex);
+        transform* LightTransform = NULL;
+        light* Light = push_light(Scene, AttenuationIndex, &LightTransform);
+        *LightTransform = load_transform(ctk::at(LightData, "transform"));
         Light->Color = load_vec4(ctk::at(LightData, "color"));
-        Light->Position = load_vec3(ctk::at(LightData, "position"));
-        set_attenuation_values(Light, AttenuationIndex);
         Light->Intensity = ctk::to_f32(LightData, "intensity");
+        set_attenuation_values(Light, AttenuationIndex);
     }
 
     // Cleanup
@@ -922,19 +889,67 @@ static void record_render_command_buffer(vulkan_instance* VulkanInstance, assets
     vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
 }
 
+static void update_entity_matrixes(VkDevice LogicalDevice, scene* Scene, glm::mat4 ViewProjectionMatrix, vtk::region* Region) {
+    if(Scene->Entities.Count == 0) return;
+
+    // Entity Model Matrixes
+    for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
+        transform* EntityTransform = &Scene->Entities.Values[EntityIndex].Transform;
+        matrix_ubo* EntityMatrixUBO = Scene->EntityMatrixUBOs + EntityIndex;
+        glm::mat4 ModelMatrix(1.0f);
+        ModelMatrix = glm::translate(ModelMatrix, { EntityTransform->Position.X, EntityTransform->Position.Y, EntityTransform->Position.Z });
+        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.X), { 1.0f, 0.0f, 0.0f });
+        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Y), { 0.0f, 1.0f, 0.0f });
+        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(EntityTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
+        ModelMatrix = glm::scale(ModelMatrix, { EntityTransform->Scale.X, EntityTransform->Scale.Y, EntityTransform->Scale.Z });
+        EntityMatrixUBO->ModelMatrix = ModelMatrix;
+        EntityMatrixUBO->ModelViewProjectionMatrix = ViewProjectionMatrix * ModelMatrix;
+    }
+
+    vtk::write_to_host_region(LogicalDevice, Region, Scene->EntityMatrixUBOs.Data, ctk::byte_count(&Scene->EntityMatrixUBOs), 0);
+}
+
+static void update_lights(VkDevice LogicalDevice, state* State, glm::mat4 ViewProjectionMatrix, u32 SwapchainImageIndex) {
+    scene *Scene = &State->Scene;
+    if(Scene->Lights.Count == 0) return;
+
+    for(u32 LightIndex = 0; LightIndex < Scene->Lights.Count; ++LightIndex) {
+        ctk::vec3<f32>* LightPosition = &Scene->Lights[LightIndex].Position;
+        matrix_ubo* LightMatrixUBO = Scene->LightMatrixUBOs + LightIndex;
+        transform* LightTransform = Scene->LightTransforms + LightIndex;
+
+        // Position
+        *LightPosition = LightTransform->Position;
+
+        // Matrix
+        glm::mat4 ModelMatrix(1.0f);
+        ModelMatrix = glm::translate(ModelMatrix, { LightPosition->X, LightPosition->Y, LightPosition->Z });
+        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(LightTransform->Rotation.X), { 1.0f, 0.0f, 0.0f });
+        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(LightTransform->Rotation.Y), { 0.0f, 1.0f, 0.0f });
+        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(LightTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
+        ModelMatrix = glm::scale(ModelMatrix, { 0.25f, 0.25f, 0.25f });
+        LightMatrixUBO->ModelMatrix = ModelMatrix;
+        LightMatrixUBO->ModelViewProjectionMatrix = ViewProjectionMatrix * ModelMatrix;
+    }
+
+    vtk::write_to_host_region(LogicalDevice, State->UniformBuffers.LightMatrixes.Regions + SwapchainImageIndex,
+                              Scene->LightMatrixUBOs.Data, ctk::byte_count(&Scene->LightMatrixUBOs), 0);
+    vtk::write_to_host_region(LogicalDevice, State->UniformBuffers.Lights.Regions + SwapchainImageIndex,
+                              &Scene->Lights, sizeof(Scene->Lights), 0);
+}
+
 static void update_scene(VkDevice LogicalDevice, input_state* InputState, state* State, u32 SwapchainImageIndex) {
     scene* Scene = &State->Scene;
     glm::mat4 ViewProjectionMatrix = view_projection_matrix(&Scene->Camera);
     update_entity_matrixes(LogicalDevice, Scene, ViewProjectionMatrix, State->UniformBuffers.EntityMatrixes.Regions + SwapchainImageIndex);
-    update_light_matrixes(LogicalDevice, Scene, ViewProjectionMatrix, State->UniformBuffers.LightMatrixes.Regions + SwapchainImageIndex);
-    vtk::write_to_host_region(LogicalDevice, State->UniformBuffers.Lights.Regions + SwapchainImageIndex,
-                              &Scene->Lights, sizeof(Scene->Lights), 0);
+    update_lights(LogicalDevice, State, ViewProjectionMatrix, SwapchainImageIndex);
     vtk::write_to_host_region(LogicalDevice, State->UniformBuffers.Materials.Regions + SwapchainImageIndex,
                               State->Materials.Values, ctk::values_byte_count(&State->Materials), 0);
 }
 
 static void draw_ui(state *State) {
-    scene *Scene = &State->Scene;
+    scene* Scene = &State->Scene;
+    control_state* ControlState = &State->ControlState;
     CTK_ITERATE(Scene->Lights.Count) {
         u32* AttenuationIndex = Scene->LightAttenuationIndexes + IterationIndex;
         char Buffer[256] = {};
@@ -950,16 +965,60 @@ static void draw_ui(state *State) {
         ImGui::SliderInt(Buffer, (s32*)&Material->ShineExponent, 0, 256);
     }
 
-    ctk::sarray<char*, 1024> EntityList = {};
-    CTK_ITERATE(Scene->Entities.Count) ctk::push(&EntityList, (char*)&Scene->Entities.Keys[IterationIndex]);
-    ImGui::ListBox("entities", (s32*)&State->ControlState.EntityIndex, EntityList.Data, EntityList.Count);
+    cstr ControlModes[] = { "entity", "light" };
+    ImGui::ListBox("control mode", (s32*)&ControlState->Mode, ControlModes, CTK_ARRAY_COUNT(ControlModes));
+
+    cstr EntityModes[] = { "translate", "rotate", "scale" };
+    ImGui::ListBox("transform mode", (s32*)&ControlState->TransformMode, EntityModes, CTK_ARRAY_COUNT(EntityModes));
+
+    if(ControlState->Mode == control_state::MODE_ENTITY) {
+        ctk::sarray<char*, 1024> EntityList = {};
+        CTK_ITERATE(Scene->Entities.Count) ctk::push(&EntityList, (char*)&Scene->Entities.Keys[IterationIndex]);
+        ImGui::ListBox("entities", (s32*)&ControlState->EntityIndex, EntityList.Data, EntityList.Count);
+    } else {
+        ctk::sarray<char*, 64> LightList = {};
+        CTK_ITERATE(Scene->Lights.Count) {
+            char* Name = ctk::allocate<char>(64);
+            sprintf(Name, "light %u", IterationIndex);
+            ctk::push(&LightList, Name);
+        }
+        ImGui::ListBox("lights", (s32*)&ControlState->LightIndex, LightList.Data, LightList.Count);
+        CTK_ITERATE(LightList.Count) ::free(LightList[IterationIndex]);
+    }
 }
 
 static void controls(state* State, input_state* InputState) {
+    scene* Scene = &State->Scene;
+    control_state* ControlState = &State->ControlState;
+
+    // View Mode
          if(InputState->KeyDown[GLFW_KEY_F1]) State->LightMode = state::LIGHT_MODE_COMPOSITE;
     else if(InputState->KeyDown[GLFW_KEY_F2]) State->LightMode = state::LIGHT_MODE_ALBEDO;
     else if(InputState->KeyDown[GLFW_KEY_F3]) State->LightMode = state::LIGHT_MODE_POSITION;
     else if(InputState->KeyDown[GLFW_KEY_F4]) State->LightMode = state::LIGHT_MODE_NORMAL;
+
+    // Camera
+    camera_controls(&Scene->Camera.Transform, InputState);
+
+    // Entities/Lights
+    transform* Transform = ControlState->Mode == control_state::MODE_ENTITY
+                           ? &Scene->Entities.Values[ControlState->EntityIndex].Transform
+                           : Scene->LightTransforms + ControlState->LightIndex;
+    ctk::vec3<f32>* TransformProperty = ControlState->TransformMode == control_state::TRANSFORM_TRANSLATE ? &Transform->Position :
+                                        ControlState->TransformMode == control_state::TRANSFORM_ROTATE ? &Transform->Rotation :
+                                        &Transform->Scale;
+    f32 Modifier = InputState->KeyDown[GLFW_KEY_LEFT_SHIFT] ? 4 :
+                   InputState->KeyDown[GLFW_KEY_LEFT_CONTROL] ? 1 :
+                   2;
+    f32 Step = ControlState->TransformMode == control_state::TRANSFORM_TRANSLATE ? 0.01 :
+               ControlState->TransformMode == control_state::TRANSFORM_ROTATE ? 0.1f :
+               0.01f;
+    if(InputState->KeyDown[GLFW_KEY_L]) TransformProperty->X += Step * Modifier;
+    if(InputState->KeyDown[GLFW_KEY_J]) TransformProperty->X -= Step * Modifier;
+    if(InputState->KeyDown[GLFW_KEY_O]) TransformProperty->Y -= Step * Modifier;
+    if(InputState->KeyDown[GLFW_KEY_U]) TransformProperty->Y += Step * Modifier;
+    if(InputState->KeyDown[GLFW_KEY_I]) TransformProperty->Z += Step * Modifier;
+    if(InputState->KeyDown[GLFW_KEY_K]) TransformProperty->Z -= Step * Modifier;
 }
 
 static void test_main() {
@@ -976,7 +1035,6 @@ static void test_main() {
 
         // Process input.
         update_input_state(&InputState, Window->Handle);
-        camera_controls(&State->Scene.Camera.Transform, &InputState);
         controls(State, &InputState);
 
         // Process frame.
