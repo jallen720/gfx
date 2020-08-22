@@ -50,6 +50,7 @@ lights [
         color [ 1 1 1 1 ]
         position [ 5 -3 5 ]
         attenuation_index 3
+        intensity 0.5
     }
     # {
     #     color [ 1 1 1 1 ]
