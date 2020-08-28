@@ -145,7 +145,8 @@ static light *push_light(scene *Scene, u32 AttenuationIndex, transform** LightTr
 }
 
 static void create_test_assets(state *State) {
-    ctk::push(&State->Materials, "test", { 32 });
+    ctk::push(&State->Materials, "test0", { 1 });
+    ctk::push(&State->Materials, "test1", { 32 });
     ctk::push(&State->Materials, "test2", { 256 });
 }
 
@@ -206,7 +207,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     MaterialIndexImageInfo.UsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
     MaterialIndexImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     MaterialIndexImageInfo.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    MaterialIndexImageInfo.Format = VK_FORMAT_R8_UINT;
+    MaterialIndexImageInfo.Format = VK_FORMAT_R32_UINT;
     State->AttachmentImages.MaterialIndex = vtk::create_image(Device, &MaterialIndexImageInfo);
 
     ////////////////////////////////////////////////////////////
@@ -271,7 +272,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     SwapchainAttachment->ClearValue = { 0, 0, 0, 1 };
 
     vtk::attachment *MaterialIndexAttachment = ctk::push(&RenderPassInfo.Attachments);
-    MaterialIndexAttachment->Description.format = VK_FORMAT_R8_UINT;
+    MaterialIndexAttachment->Description.format = VK_FORMAT_R32_UINT;
     MaterialIndexAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
     MaterialIndexAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     MaterialIndexAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -753,7 +754,8 @@ static void create_scene(state *State, assets *Assets, vulkan_instance *VulkanIn
         Entity->Transform = load_transform(ctk::at(EntityData, "transform"));
         Entity->TextureDS = ctk::at(&State->DescriptorSets.Textures, ctk::to_cstr(EntityData, "texture"));
         Entity->Mesh = ctk::at(&Assets->Meshes, ctk::to_cstr(EntityData, "mesh"));
-        ctk::find(&State->Materials, ctk::to_cstr(EntityData, "material"), &Entity->MaterialIndex);
+        Entity->MaterialIndex = ctk::find_index(&State->Materials, ctk::to_cstr(EntityData, "material"));
+        CTK_ASSERT(Entity->MaterialIndex != CTK_U32_MAX);
     }
 
     // Lights

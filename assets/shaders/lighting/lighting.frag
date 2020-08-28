@@ -32,7 +32,7 @@ struct fragment {
 layout(set = 0, binding = 0, input_attachment_index = 0) uniform subpassInput AlbedoInput;
 layout(set = 0, binding = 1, input_attachment_index = 1) uniform subpassInput PositionInput;
 layout(set = 0, binding = 2, input_attachment_index = 2) uniform subpassInput NormalInput;
-layout(set = 0, binding = 3, input_attachment_index = 3) uniform subpassInput MaterialIndexInput;
+layout(set = 0, binding = 3, input_attachment_index = 3) uniform usubpassInput MaterialIndexInput;
 
 layout(set = 1, binding = 0, std140) uniform lights {
     light Data[16];
@@ -61,7 +61,7 @@ void main() {
     Fragment.Albedo = vec4(subpassLoad(AlbedoInput).rgb, 1);
     Fragment.Position = subpassLoad(PositionInput).rgb;
     Fragment.Normal = subpassLoad(NormalInput).rgb;
-    Fragment.MaterialIndex = uint(subpassLoad(MaterialIndexInput).r);
+    Fragment.MaterialIndex = subpassLoad(MaterialIndexInput).r;
     switch(PushConstants.Mode) {
         case MODE_COMPOSITE: {
             vec4 FinalColor = vec4(0);

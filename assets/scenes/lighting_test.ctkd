@@ -17,7 +17,7 @@ entities {
         }
         texture brick
         mesh sibenik
-        material test
+        material test0
     }
     cube {
         transform {
@@ -27,7 +27,7 @@ entities {
         }
         texture grass_cube
         mesh cube
-        material test
+        material test1
     }
     quad {
         transform {
