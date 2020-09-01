@@ -148,14 +148,7 @@ struct App {
 
 static void key_callback(GLFWwindow* Window, s32 Key, s32 Scancode, s32 Action, s32 Mods) {
     auto app = (App *)glfwGetWindowUserPointer(Window);
-    if (Action == GLFW_PRESS || Action == GLFW_REPEAT) {
-        app->InputState->KeyDown[Key] = true;
-        app->UI->IO->KeysDown[Key] = true;
-        app->UI->IO->AddInputCharacter((char)Key);
-    } else if (Action == GLFW_RELEASE) {
-        app->InputState->KeyDown[Key] = false;
-        app->UI->IO->KeysDown[Key] = false;
-    }
+    app->InputState->KeyDown[Key] = Action == GLFW_PRESS || Action == GLFW_REPEAT;
 }
 
 static void mouse_button_callback(GLFWwindow* Window, s32 Button, s32 Action, s32 Mods) {
@@ -1010,23 +1003,29 @@ static void list_box_end() {
 
 static bool window_begin(cstr title, s32 x, s32 y, s32 width, s32 height, s32 flags) {
     ImGui::SetNextWindowPos({ (f32)x, (f32)y });
-    // ImGui::SetNextWindowSize({ 0, (f32)height });
     return ImGui::Begin(title, NULL, flags);
 }
 
 static void window_end() { ImGui::End(); }
 
+static void separator() {
+    ImVec2 output_pos = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(output_pos.x, output_pos.y + 1),
+                                        ImVec2(output_pos.x + ImGui::GetColumnWidth(), output_pos.y + 1),
+                                        IM_COL32(255, 255, 255, 64));
+    ImGui::Dummy(ImVec2(0, 2));
+}
+
 static void transform_control(transform *Transform) {
-    ImGui::InputFloat3("position", &Transform->Position.X);
-    ImGui::InputFloat3("rotation", &Transform->Rotation.X);
-    ImGui::InputFloat3("scale", &Transform->Scale.X);
+    ImGui::Text("transform");
+    ImGui::DragFloat3("position", &Transform->Position.X, 0.01f);
+    ImGui::DragFloat3("rotation", &Transform->Rotation.X, 0.1f);
+    ImGui::DragFloat3("scale", &Transform->Scale.X, 0.01f);
 }
 
 static void draw_ui(ui *UI, state *State, window *win) {
     scene *Scene = &State->Scene;
     control_state *ControlState = &State->ControlState;
-    ImGuiStyle &style = ImGui::GetStyle();
-    style.WindowRounding = 0.0f;
 
     static cstr MODES[] = { "entities", "light", "materials" };
     cstr CurrentMode = MODES[ControlState->Mode];
@@ -1081,8 +1080,23 @@ static void draw_ui(ui *UI, state *State, window *win) {
             entity *Entity = Scene->Entities.Values + ControlState->EntityIndex;
             transform_control(&Entity->Transform);
         } else if (ControlState->Mode == control_state::MODE_LIGHT) {
-            ImGui::ColorPicker4("color", &Scene->Lights[ControlState->LightIndex].Color.X);
+            light *Light = Scene->Lights + ControlState->LightIndex;
             transform_control(Scene->LightTransforms + ControlState->LightIndex);
+            separator();
+            ImGui::SliderFloat("intensity", &Light->Intensity, 0.0f, 1.0f);
+            s32 *attenuation_index = (s32 *)(Scene->LightAttenuationIndexes + ControlState->LightIndex);
+            if (ImGui::SliderInt("attenuation index", attenuation_index, 0, ATTENUATION_VALUE_COUNT - 1))
+                set_attenuation_values(Light, *attenuation_index);
+            separator();
+            ImGui::Text("color");
+            ImGui::ColorPicker4("##color", &Light->Color.X);
+
+        } else if (ControlState->Mode == control_state::MODE_MATERIAL) {
+            struct material *material = State->Materials.Values + ControlState->MaterialIndex;
+            ImGui::PushItemWidth(50);
+            ImGui::SliderInt("shine exponent", (s32 *)&material->ShineExponent, 1, 256);
+            ImGui::DragFloat("specular intensity", &material->SpecularIntensity, 0.01f, 0.0f, 10.0f);
+            ImGui::PopItemWidth();
         }
     }
     window_end();
@@ -1122,55 +1136,50 @@ static void controls(state *State, input_state *InputState) {
     if (InputState->KeyDown[GLFW_KEY_K]) TransformProperty->Z -= Step * Modifier;
 }
 
-static App *create_app() {
-    App *app = ctk::allocate<App>();
-    *app = {};
+static void test_main() {
+    App app = {};
 
-    app->InputState = ctk::allocate<input_state>(1);
-    *app->InputState = {};
-
+    app.InputState = ctk::allocate<input_state>(1);
+    *app.InputState = {};
 
     WindowInfo window_info = {};
-    window_info.user_pointer = (void *)app;
+    window_info.user_pointer = (void *)&app;
     window_info.key_callback = key_callback;
     window_info.mouse_button_callback = mouse_button_callback;
-    app->Window = create_window(&window_info);
+    app.Window = create_window(&window_info);
 
-    app->VulkanInstance = create_vulkan_instance(app->Window);
-    app->Assets = create_assets(app->VulkanInstance);
-    app->State = create_state(app->VulkanInstance, app->Assets);
+    app.VulkanInstance = create_vulkan_instance(app.Window);
+    app.Assets = create_assets(app.VulkanInstance);
+    app.State = create_state(app.VulkanInstance, app.Assets);
 
-    app->UI = create_ui(app->Window, app->VulkanInstance);
-    app->UI->IO->KeyMap[ImGuiKey_Delete] = GLFW_KEY_DELETE;
-    app->UI->IO->KeyMap[ImGuiKey_Backspace] = GLFW_KEY_BACKSPACE;
+    app.UI = create_ui(app.Window, app.VulkanInstance);
+    app.UI->IO->KeyMap[ImGuiKey_Delete] = GLFW_KEY_DELETE;
+    app.UI->IO->KeyMap[ImGuiKey_Backspace] = GLFW_KEY_BACKSPACE;
+    ImGuiStyle &style = ImGui::GetStyle();
+    style.WindowRounding = 0.0f;
 
-    return app;
-}
-
-static void test_main() {
-    App *app = create_app();
-    while (!glfwWindowShouldClose(app->Window->Handle)) {
+    while (!glfwWindowShouldClose(app.Window->Handle)) {
         // Check if window should close.
         glfwPollEvents();
-        if (app->InputState->KeyDown[GLFW_KEY_ESCAPE]) break;
+        if (app.InputState->KeyDown[GLFW_KEY_ESCAPE]) break;
 
         // Process input.
-        if (!app->UI->IO->WantCaptureKeyboard) {
-            update_input_state(app->InputState, app->Window->Handle);
-            controls(app->State, app->InputState);
+        if (!app.UI->IO->WantCaptureKeyboard) {
+            update_input_state(app.InputState, app.Window->Handle);
+            controls(app.State, app.InputState);
         }
 
         // Process frame.
-        u32 SwapchainImageIndex = aquire_next_swapchain_image_index(app->VulkanInstance);
-        record_render_command_buffer(app->VulkanInstance, app->Assets, app->State, SwapchainImageIndex);
+        u32 SwapchainImageIndex = aquire_next_swapchain_image_index(app.VulkanInstance);
+        record_render_command_buffer(app.VulkanInstance, app.Assets, app.State, SwapchainImageIndex);
         ui_new_frame();
-        draw_ui(app->UI, app->State, app->Window);
-        record_ui_command_buffer(app->VulkanInstance, app->UI, SwapchainImageIndex);
-        update_scene(app->VulkanInstance->Device.Logical, app->InputState, app->State, SwapchainImageIndex);
-        synchronize_current_frame(app->VulkanInstance, SwapchainImageIndex);
-        vtk::render_pass *RenderPasses[] = { &app->State->RenderPass, &app->UI->RenderPass };
-        submit_render_passes(app->VulkanInstance, RenderPasses, CTK_ARRAY_COUNT(RenderPasses), SwapchainImageIndex);
-        cycle_frame(app->VulkanInstance);
+        draw_ui(app.UI, app.State, app.Window);
+        record_ui_command_buffer(app.VulkanInstance, app.UI, SwapchainImageIndex);
+        update_scene(app.VulkanInstance->Device.Logical, app.InputState, app.State, SwapchainImageIndex);
+        synchronize_current_frame(app.VulkanInstance, SwapchainImageIndex);
+        vtk::render_pass *RenderPasses[] = { &app.State->RenderPass, &app.UI->RenderPass };
+        submit_render_passes(app.VulkanInstance, RenderPasses, CTK_ARRAY_COUNT(RenderPasses), SwapchainImageIndex);
+        cycle_frame(app.VulkanInstance);
         Sleep(1);
     }
 }
