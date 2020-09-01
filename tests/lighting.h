@@ -171,17 +171,22 @@ static light *push_light(scene *Scene, u32 AttenuationIndex, transform** LightTr
 static void create_test_assets(state *State) {
     {
         material *Material = ctk::push(&State->Materials, "test0");
-        Material->ShineExponent = 1;
+        Material->ShineExponent = 4;
         Material->SpecularIntensity = 0.0f;
     }
     {
         material *Material = ctk::push(&State->Materials, "test1");
-        Material->ShineExponent = 32;
+        Material->ShineExponent = 256;
         Material->SpecularIntensity = 1.0f;
     }
     {
         material *Material = ctk::push(&State->Materials, "test2");
-        Material->ShineExponent = 256;
+        Material->ShineExponent = 1024;
+        Material->SpecularIntensity = 1.0f;
+    }
+    {
+        material *Material = ctk::push(&State->Materials, "blinn_phong");
+        Material->ShineExponent = 4;
         Material->SpecularIntensity = 1.0f;
     }
 }
@@ -1093,8 +1098,8 @@ static void draw_ui(ui *UI, state *State, window *win) {
 
         } else if (ControlState->Mode == control_state::MODE_MATERIAL) {
             struct material *material = State->Materials.Values + ControlState->MaterialIndex;
+            ImGui::SliderInt("shine exponent", (s32 *)&material->ShineExponent, 4, 1024);
             ImGui::PushItemWidth(50);
-            ImGui::SliderInt("shine exponent", (s32 *)&material->ShineExponent, 1, 256);
             ImGui::DragFloat("specular intensity", &material->SpecularIntensity, 0.01f, 0.0f, 10.0f);
             ImGui::PopItemWidth();
         }

@@ -70,19 +70,26 @@ void main() {
             for(uint LightIndex = 0; LightIndex < Lights.Count; ++LightIndex) {
                 light Light = Lights.Data[LightIndex];
                 vec4 LightColor = Light.Color * Light.Intensity;
-                vec3 DirectionToLight = normalize(Light.Position.xyz - Fragment.Position);
+                vec3 LightDirection = normalize(Light.Position.xyz - Fragment.Position);
 
                 // Ambient
                 vec4 Ambient = Fragment.Albedo * LightColor * vec4(vec3(0.2), 1);
 
                 // Diffuse
-                float DiffuseValue = max(dot(Fragment.Normal, DirectionToLight), 0.0);
+                float DiffuseValue = max(dot(Fragment.Normal, LightDirection), 0.0);
                 vec4 Diffuse = Fragment.Albedo * LightColor * DiffuseValue;
 
                 // Specular
                 vec3 ViewDirection = normalize(PushConstants.ViewPosition - Fragment.Position);
-                vec3 ReflectDirection = reflect(-DirectionToLight, Fragment.Normal);
-                float SpecularValue = pow(max(dot(ViewDirection, ReflectDirection), 0.0), Material.ShineExponent);
+
+                // // Phong
+                // vec3 ReflectDirection = reflect(-LightDirection, Fragment.Normal);
+                // float SpecularValue = pow(max(dot(ViewDirection, ReflectDirection), 0.0), Material.ShineExponent);
+
+                // Blinn-Phong
+                vec3 HalfDirection = normalize(LightDirection + ViewDirection);
+                float SpecularValue = pow(max(dot(Fragment.Normal, HalfDirection), 0.0), Material.ShineExponent);
+
                 vec4 Specular = Fragment.Albedo.a * LightColor * SpecularValue * DiffuseValue * Material.SpecularIntensity;
 
                 FinalColor += (Diffuse + Specular + Ambient) * attenuation(Light, distance(Light.Position, Fragment.Position));
