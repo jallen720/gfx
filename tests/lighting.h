@@ -58,21 +58,26 @@ struct lighting_push_constants {
 
 struct material {
     u32 ShineExponent;
-    char Pad[12];
+    f32 SpecularIntensity;
+    char Pad[8];
 };
 
 struct control_state {
     enum {
         MODE_ENTITY,
         MODE_LIGHT,
-    } Mode;
+        MODE_MATERIAL,
+    };
     enum {
         TRANSFORM_TRANSLATE,
         TRANSFORM_ROTATE,
         TRANSFORM_SCALE,
-    } TransformMode;
+    };
+    s32 Mode;
+    s32 TransformMode;
     u32 EntityIndex;
     u32 LightIndex;
+    u32 MaterialIndex;
 };
 
 struct state {
@@ -132,6 +137,32 @@ struct state {
     ctk::smap<material, MAX_MATERIALS> Materials;
 };
 
+struct App {
+    input_state *InputState;
+    window *Window;
+    vulkan_instance *VulkanInstance;
+    assets *Assets;
+    state *State;
+    ui *UI;
+};
+
+static void key_callback(GLFWwindow* Window, s32 Key, s32 Scancode, s32 Action, s32 Mods) {
+    auto app = (App *)glfwGetWindowUserPointer(Window);
+    if (Action == GLFW_PRESS || Action == GLFW_REPEAT) {
+        app->InputState->KeyDown[Key] = true;
+        app->UI->IO->KeysDown[Key] = true;
+        app->UI->IO->AddInputCharacter((char)Key);
+    } else if (Action == GLFW_RELEASE) {
+        app->InputState->KeyDown[Key] = false;
+        app->UI->IO->KeysDown[Key] = false;
+    }
+}
+
+static void mouse_button_callback(GLFWwindow* Window, s32 Button, s32 Action, s32 Mods) {
+    auto app = (App *)glfwGetWindowUserPointer(Window);
+    app->InputState->MouseButtonDown[Button] = Action == GLFW_PRESS || Action == GLFW_REPEAT;
+}
+
 static entity *push_entity(scene *Scene, cstr Name) {
     ctk::push(&Scene->EntityMatrixUBOs);
     return ctk::push(&Scene->Entities, Name);
@@ -145,9 +176,21 @@ static light *push_light(scene *Scene, u32 AttenuationIndex, transform** LightTr
 }
 
 static void create_test_assets(state *State) {
-    ctk::push(&State->Materials, "test0", { 1 });
-    ctk::push(&State->Materials, "test1", { 32 });
-    ctk::push(&State->Materials, "test2", { 256 });
+    {
+        material *Material = ctk::push(&State->Materials, "test0");
+        Material->ShineExponent = 1;
+        Material->SpecularIntensity = 0.0f;
+    }
+    {
+        material *Material = ctk::push(&State->Materials, "test1");
+        Material->ShineExponent = 32;
+        Material->SpecularIntensity = 1.0f;
+    }
+    {
+        material *Material = ctk::push(&State->Materials, "test2");
+        Material->ShineExponent = 256;
+        Material->SpecularIntensity = 1.0f;
+    }
 }
 
 static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, assets *Assets) {
@@ -949,44 +992,100 @@ static void update_scene(VkDevice LogicalDevice, input_state *InputState, state 
                               State->Materials.Values, ctk::values_byte_count(&State->Materials), 0);
 }
 
-static void draw_ui(state *State) {
+////////////////////////////////////////////////////////////
+/// UI
+////////////////////////////////////////////////////////////
+static bool list_box_begin(cstr id, cstr title, u32 item_count, u32 viewable_item_count = -1) {
+    ImGui::PushItemWidth(-1);
+    char imgui_id[256] = {};
+    sprintf(imgui_id, "##%s", id);
+    if (title) ImGui::Text(title);
+    return ImGui::ListBoxHeader(imgui_id, item_count, viewable_item_count);
+}
+
+static void list_box_end() {
+    ImGui::ListBoxFooter();
+    ImGui::PopItemWidth();
+}
+
+static bool window_begin(cstr title, s32 x, s32 y, s32 width, s32 height, s32 flags) {
+    ImGui::SetNextWindowPos({ (f32)x, (f32)y });
+    // ImGui::SetNextWindowSize({ 0, (f32)height });
+    return ImGui::Begin(title, NULL, flags);
+}
+
+static void window_end() { ImGui::End(); }
+
+static void transform_control(transform *Transform) {
+    ImGui::InputFloat3("position", &Transform->Position.X);
+    ImGui::InputFloat3("rotation", &Transform->Rotation.X);
+    ImGui::InputFloat3("scale", &Transform->Scale.X);
+}
+
+static void draw_ui(ui *UI, state *State, window *win) {
     scene *Scene = &State->Scene;
     control_state *ControlState = &State->ControlState;
-    CTK_ITERATE(Scene->Lights.Count) {
-        u32 *AttenuationIndex = Scene->LightAttenuationIndexes + IterationIndex;
-        char Buffer[256] = {};
-        sprintf(Buffer, "light %u attenuation index", IterationIndex);
-        ImGui::SliderInt(Buffer, (s32*)AttenuationIndex, 0, ATTENUATION_VALUE_COUNT - 1);
-        set_attenuation_values(Scene->Lights + IterationIndex, *AttenuationIndex);
-    }
+    ImGuiStyle &style = ImGui::GetStyle();
+    style.WindowRounding = 0.0f;
 
-    CTK_ITERATE(State->Materials.Count) {
-        material *Material = State->Materials.Values + IterationIndex;
-        char Buffer[256] = {};
-        sprintf(Buffer, "material \"%s\" shine exponent", State->Materials.Keys + IterationIndex);
-        ImGui::SliderInt(Buffer, (s32*)&Material->ShineExponent, 0, 256);
-    }
+    static cstr MODES[] = { "entities", "light", "materials" };
+    cstr CurrentMode = MODES[ControlState->Mode];
+    s32 window_flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove/* | ImGuiWindowFlags_NoResize*/;
+    if (window_begin("states", 0, 0, 600, (s32)win->Height, window_flags)) {
+        ImGui::Columns(2, NULL);
 
-    cstr ControlModes[] = { "entity", "light" };
-    ImGui::ListBox("control mode", (s32*)&ControlState->Mode, ControlModes, CTK_ARRAY_COUNT(ControlModes));
-
-    cstr EntityModes[] = { "translate", "rotate", "scale" };
-    ImGui::ListBox("transform mode", (s32*)&ControlState->TransformMode, EntityModes, CTK_ARRAY_COUNT(EntityModes));
-
-    if(ControlState->Mode == control_state::MODE_ENTITY) {
-        ctk::sarray<char*, 1024> EntityList = {};
-        CTK_ITERATE(Scene->Entities.Count) ctk::push(&EntityList, (char*)&Scene->Entities.Keys[IterationIndex]);
-        ImGui::ListBox("entities", (s32*)&ControlState->EntityIndex, EntityList.Data, EntityList.Count);
-    } else {
-        ctk::sarray<char*, 64> LightList = {};
-        CTK_ITERATE(Scene->Lights.Count) {
-            char *Name = ctk::allocate<char>(64);
-            sprintf(Name, "light %u", IterationIndex);
-            ctk::push(&LightList, Name);
+        ImGui::PushItemWidth(-1);
+        if (ImGui::BeginCombo("", CurrentMode)) {
+            CTK_ITERATE(CTK_ARRAY_COUNT(MODES)) {
+                cstr Mode = MODES[IterationIndex];
+                bool IsSelected = CurrentMode == Mode;
+                if (ImGui::Selectable(Mode, IsSelected))
+                    ControlState->Mode = IterationIndex;
+                if (IsSelected)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
         }
-        ImGui::ListBox("lights", (s32*)&ControlState->LightIndex, LightList.Data, LightList.Count);
-        CTK_ITERATE(LightList.Count) ::free(LightList[IterationIndex]);
+        ImGui::PopItemWidth();
+
+        if (ControlState->Mode == control_state::MODE_ENTITY) {
+            if (list_box_begin("0", NULL, Scene->Entities.Count))
+                for (u32 i = 0; i < Scene->Entities.Count; ++i)
+                    if (ImGui::Selectable(Scene->Entities.Keys[i], i == ControlState->EntityIndex))
+                        ControlState->EntityIndex = i;
+            list_box_end();
+        } else if (ControlState->Mode == control_state::MODE_LIGHT) {
+            if (list_box_begin("1", NULL, Scene->Lights.Count)) {
+                for (u32 i = 0; i < Scene->Lights.Count; ++i) {
+                    char Name[16] = {};
+                    sprintf(Name, "light %u", i);
+                    if (ImGui::Selectable(Name, i == ControlState->LightIndex))
+                        ControlState->LightIndex = i;
+                }
+            }
+            list_box_end();
+        } else {
+            if (list_box_begin("2", NULL, State->Materials.Count)) {
+                for (u32 i = 0; i < State->Materials.Count; ++i) {
+                    char Name[16] = {};
+                    sprintf(Name, "material %u", i);
+                    if (ImGui::Selectable(Name, i == ControlState->MaterialIndex))
+                        ControlState->MaterialIndex = i;
+                }
+            }
+            list_box_end();
+        }
+
+        ImGui::NextColumn();
+        if (ControlState->Mode == control_state::MODE_ENTITY) {
+            entity *Entity = Scene->Entities.Values + ControlState->EntityIndex;
+            transform_control(&Entity->Transform);
+        } else if (ControlState->Mode == control_state::MODE_LIGHT) {
+            ImGui::ColorPicker4("color", &Scene->Lights[ControlState->LightIndex].Color.X);
+            transform_control(Scene->LightTransforms + ControlState->LightIndex);
+        }
     }
+    window_end();
 }
 
 static void controls(state *State, input_state *InputState) {
@@ -994,10 +1093,10 @@ static void controls(state *State, input_state *InputState) {
     control_state *ControlState = &State->ControlState;
 
     // View Mode
-         if(InputState->KeyDown[GLFW_KEY_F1]) State->LightMode = state::LIGHT_MODE_COMPOSITE;
-    else if(InputState->KeyDown[GLFW_KEY_F2]) State->LightMode = state::LIGHT_MODE_ALBEDO;
-    else if(InputState->KeyDown[GLFW_KEY_F3]) State->LightMode = state::LIGHT_MODE_POSITION;
-    else if(InputState->KeyDown[GLFW_KEY_F4]) State->LightMode = state::LIGHT_MODE_NORMAL;
+         if (InputState->KeyDown[GLFW_KEY_F1]) State->LightMode = state::LIGHT_MODE_COMPOSITE;
+    else if (InputState->KeyDown[GLFW_KEY_F2]) State->LightMode = state::LIGHT_MODE_ALBEDO;
+    else if (InputState->KeyDown[GLFW_KEY_F3]) State->LightMode = state::LIGHT_MODE_POSITION;
+    else if (InputState->KeyDown[GLFW_KEY_F4]) State->LightMode = state::LIGHT_MODE_NORMAL;
 
     // Camera
     camera_controls(&Scene->Camera.Transform, InputState);
@@ -1015,41 +1114,63 @@ static void controls(state *State, input_state *InputState) {
     f32 Step = ControlState->TransformMode == control_state::TRANSFORM_TRANSLATE ? 0.01 :
                ControlState->TransformMode == control_state::TRANSFORM_ROTATE ? 0.1f :
                0.01f;
-    if(InputState->KeyDown[GLFW_KEY_L]) TransformProperty->X += Step * Modifier;
-    if(InputState->KeyDown[GLFW_KEY_J]) TransformProperty->X -= Step * Modifier;
-    if(InputState->KeyDown[GLFW_KEY_O]) TransformProperty->Y -= Step * Modifier;
-    if(InputState->KeyDown[GLFW_KEY_U]) TransformProperty->Y += Step * Modifier;
-    if(InputState->KeyDown[GLFW_KEY_I]) TransformProperty->Z += Step * Modifier;
-    if(InputState->KeyDown[GLFW_KEY_K]) TransformProperty->Z -= Step * Modifier;
+    if (InputState->KeyDown[GLFW_KEY_L]) TransformProperty->X += Step * Modifier;
+    if (InputState->KeyDown[GLFW_KEY_J]) TransformProperty->X -= Step * Modifier;
+    if (InputState->KeyDown[GLFW_KEY_O]) TransformProperty->Y -= Step * Modifier;
+    if (InputState->KeyDown[GLFW_KEY_U]) TransformProperty->Y += Step * Modifier;
+    if (InputState->KeyDown[GLFW_KEY_I]) TransformProperty->Z += Step * Modifier;
+    if (InputState->KeyDown[GLFW_KEY_K]) TransformProperty->Z -= Step * Modifier;
+}
+
+static App *create_app() {
+    App *app = ctk::allocate<App>();
+    *app = {};
+
+    app->InputState = ctk::allocate<input_state>(1);
+    *app->InputState = {};
+
+
+    WindowInfo window_info = {};
+    window_info.user_pointer = (void *)app;
+    window_info.key_callback = key_callback;
+    window_info.mouse_button_callback = mouse_button_callback;
+    app->Window = create_window(&window_info);
+
+    app->VulkanInstance = create_vulkan_instance(app->Window);
+    app->Assets = create_assets(app->VulkanInstance);
+    app->State = create_state(app->VulkanInstance, app->Assets);
+
+    app->UI = create_ui(app->Window, app->VulkanInstance);
+    app->UI->IO->KeyMap[ImGuiKey_Delete] = GLFW_KEY_DELETE;
+    app->UI->IO->KeyMap[ImGuiKey_Backspace] = GLFW_KEY_BACKSPACE;
+
+    return app;
 }
 
 static void test_main() {
-    input_state InputState = {};
-    window *Window = create_window(&InputState);
-    vulkan_instance *VulkanInstance = create_vulkan_instance(Window);
-    assets *Assets = create_assets(VulkanInstance);
-    state *State = create_state(VulkanInstance, Assets);
-    ui *UI = create_ui(Window, VulkanInstance);
-    while(!glfwWindowShouldClose(Window->Handle)) {
+    App *app = create_app();
+    while (!glfwWindowShouldClose(app->Window->Handle)) {
         // Check if window should close.
         glfwPollEvents();
-        if(InputState.KeyDown[GLFW_KEY_ESCAPE]) break;
+        if (app->InputState->KeyDown[GLFW_KEY_ESCAPE]) break;
 
         // Process input.
-        update_input_state(&InputState, Window->Handle);
-        controls(State, &InputState);
+        if (!app->UI->IO->WantCaptureKeyboard) {
+            update_input_state(app->InputState, app->Window->Handle);
+            controls(app->State, app->InputState);
+        }
 
         // Process frame.
-        u32 SwapchainImageIndex = aquire_next_swapchain_image_index(VulkanInstance);
-        record_render_command_buffer(VulkanInstance, Assets, State, SwapchainImageIndex);
+        u32 SwapchainImageIndex = aquire_next_swapchain_image_index(app->VulkanInstance);
+        record_render_command_buffer(app->VulkanInstance, app->Assets, app->State, SwapchainImageIndex);
         ui_new_frame();
-        draw_ui(State);
-        record_ui_command_buffer(VulkanInstance, UI, SwapchainImageIndex);
-        update_scene(VulkanInstance->Device.Logical, &InputState, State, SwapchainImageIndex);
-        synchronize_current_frame(VulkanInstance, SwapchainImageIndex);
-        vtk::render_pass *RenderPasses[] = { &State->RenderPass, &UI->RenderPass };
-        submit_render_passes(VulkanInstance, RenderPasses, CTK_ARRAY_COUNT(RenderPasses), SwapchainImageIndex);
-        cycle_frame(VulkanInstance);
+        draw_ui(app->UI, app->State, app->Window);
+        record_ui_command_buffer(app->VulkanInstance, app->UI, SwapchainImageIndex);
+        update_scene(app->VulkanInstance->Device.Logical, app->InputState, app->State, SwapchainImageIndex);
+        synchronize_current_frame(app->VulkanInstance, SwapchainImageIndex);
+        vtk::render_pass *RenderPasses[] = { &app->State->RenderPass, &app->UI->RenderPass };
+        submit_render_passes(app->VulkanInstance, RenderPasses, CTK_ARRAY_COUNT(RenderPasses), SwapchainImageIndex);
+        cycle_frame(app->VulkanInstance);
         Sleep(1);
     }
 }

@@ -26,12 +26,6 @@ static const ctk::vec2<f64> UNSET_MOUSE_POSITION = { -10000.0, -10000.0 };
 ////////////////////////////////////////////////////////////
 /// Data
 ////////////////////////////////////////////////////////////
-struct window {
-    GLFWwindow* Handle;
-    u32 Width;
-    u32 Height;
-};
-
 struct input_state {
     b32 KeyDown[GLFW_KEY_LAST + 1];
     b32 MouseButtonDown[GLFW_MOUSE_BUTTON_LAST + 1];
@@ -155,16 +149,6 @@ static void error_callback(s32 Error, cstr Description) {
     CTK_FATAL("[%d] %s", Error, Description)
 }
 
-static void key_callback(GLFWwindow* Window, s32 Key, s32 Scancode, s32 Action, s32 Mods) {
-    auto InputState = (input_state*)glfwGetWindowUserPointer(Window);
-    InputState->KeyDown[Key] = Action == GLFW_PRESS || Action == GLFW_REPEAT;
-}
-
-static void mouse_button_callback(GLFWwindow* Window, s32 Button, s32 Action, s32 Mods) {
-    auto InputState = (input_state*)glfwGetWindowUserPointer(Window);
-    InputState->MouseButtonDown[Button] = Action == GLFW_PRESS || Action == GLFW_REPEAT;
-}
-
 static mesh create_mesh(vulkan_instance* VulkanInstance, cstr Path) {
     mesh Mesh = {};
 
@@ -248,9 +232,21 @@ static void check_vk_result(VkResult Result) {
 }
 
 ////////////////////////////////////////////////////////////
-/// Interface
+/// Window
 ////////////////////////////////////////////////////////////
-static window* create_window(input_state* InputState) {
+struct window {
+    GLFWwindow* Handle;
+    u32 Width;
+    u32 Height;
+};
+
+struct WindowInfo {
+    void *user_pointer;
+    void (*key_callback)(GLFWwindow* Window, s32 Key, s32 Scancode, s32 Action, s32 Mods);
+    void (*mouse_button_callback)(GLFWwindow* Window, s32 Button, s32 Action, s32 Mods);
+};
+
+static window *create_window(WindowInfo *info) {
     auto Window = ctk::allocate<window>();
     *Window = {};
     ctk::data Data = ctk::load_data("assets/data/window.ctkd");
@@ -267,13 +263,15 @@ static window* create_window(input_state* InputState) {
         CTK_FATAL("failed to create window")
     }
     glfwSetWindowPos(Window->Handle, ctk::to_s32(&Data, "x"), ctk::to_s32(&Data, "y"));
-    glfwSetWindowUserPointer(Window->Handle, (void*)InputState);
-    // glfwSetFramebufferSizeCallback(Window->Handle, FramebufferResizeCallback);
-    glfwSetKeyCallback(Window->Handle, key_callback);
-    glfwSetMouseButtonCallback(Window->Handle, mouse_button_callback);
+    glfwSetWindowUserPointer(Window->Handle, info->user_pointer);
+    glfwSetKeyCallback(Window->Handle, info->key_callback);
+    glfwSetMouseButtonCallback(Window->Handle, info->mouse_button_callback);
     return Window;
 }
 
+////////////////////////////////////////////////////////////
+/// Interface
+////////////////////////////////////////////////////////////
 static vulkan_instance* create_vulkan_instance(window* Window) {
     auto VulkanInstance = ctk::allocate<vulkan_instance>();
     *VulkanInstance = {};

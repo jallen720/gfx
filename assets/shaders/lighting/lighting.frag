@@ -20,6 +20,7 @@ struct light {
 
 struct material {
     uint ShineExponent;
+    float SpecularIntensity;
 };
 
 struct fragment {
@@ -79,7 +80,7 @@ void main() {
                 vec3 ViewDirection = normalize(PushConstants.ViewPosition - Fragment.Position);
                 vec3 ReflectDirection = reflect(-DirectionToLight, Fragment.Normal);
                 float SpecularValue = pow(max(dot(ViewDirection, ReflectDirection), 0.0), Material.ShineExponent);
-                vec4 Specular = Fragment.Albedo.a * LightColor * SpecularValue * DiffuseValue;
+                vec4 Specular = Fragment.Albedo.a * LightColor * SpecularValue * DiffuseValue * Material.SpecularIntensity;
 
                 FinalColor += (Diffuse + Specular) * attenuation(Light, distance(Light.Position, Fragment.Position));
             }

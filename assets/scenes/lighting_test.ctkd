@@ -4,7 +4,7 @@ camera {
         rotation [ 45 -45 0 ]
         scale [ 1 1 1 ]
     }
-    field_of_view 103
+    field_of_view 90
     z_near 0.1
     z_far 100
 }
