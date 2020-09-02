@@ -19,16 +19,16 @@ entities {
     #     mesh sibenik
     #     material test0
     # }
-    # cube {
-    #     transform {
-    #         position [ 1 2.5 1 ]
-    #         rotation [ 0 0 0 ]
-    #         scale [ 4 4 4 ]
-    #     }
-    #     texture grass_cube
-    #     mesh cube
-    #     material test1
-    # }
+    cube {
+        transform {
+            position [ 1 2.5 1 ]
+            rotation [ 0 0 0 ]
+            scale [ 4 4 4 ]
+        }
+        texture grass_cube
+        mesh cube
+        material test1
+    }
     quad {
         transform {
             position [ 0 0 0 ]

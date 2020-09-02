@@ -6,113 +6,122 @@
 #define MODE_POSITION 2
 #define MODE_NORMAL 3
 
-struct light {
-    vec4 Color;
-    // vec3 Direction;
-    // int Mode;
-    vec3 Position;
-    float Linear;
-    float Quadratic;
-    float Intensity;
-    // float Cutoff;
-    // float OuterCutoff;
+struct s_light {
+    vec4 color;
+    // vec3 dir;
+    // int mode;
+    vec3 position;
+    float linear;
+    float quadratic;
+    float intensity;
+    // float cutoff;
+    // float outer_cutoff;
 };
 
-struct material {
-    uint ShineExponent;
-    float SpecularIntensity;
+struct s_material {
+    uint shine_exponent;
+    float specular_intensity;
 };
 
-struct fragment {
-    vec4 Albedo;
-    vec3 Position;
-    vec3 Normal;
-    uint MaterialIndex;
+struct s_fragment {
+    vec4 albedo;
+    vec3 position;
+    vec3 normal;
+    uint mat_idx;
 };
 
-layout(set = 0, binding = 0, input_attachment_index = 0) uniform subpassInput AlbedoInput;
-layout(set = 0, binding = 1, input_attachment_index = 1) uniform subpassInput PositionInput;
-layout(set = 0, binding = 2, input_attachment_index = 2) uniform subpassInput NormalInput;
-layout(set = 0, binding = 3, input_attachment_index = 3) uniform usubpassInput MaterialIndexInput;
+layout (set = 0, binding = 0, input_attachment_index = 0) uniform subpassInput in_albedo;
+layout (set = 0, binding = 1, input_attachment_index = 1) uniform subpassInput in_position;
+layout (set = 0, binding = 2, input_attachment_index = 2) uniform subpassInput in_normal;
+layout (set = 0, binding = 3, input_attachment_index = 3) uniform usubpassInput in_mat_idx;
 
-layout(set = 1, binding = 0, std140) uniform lights {
-    light Data[16];
-    uint Size;
-    uint Count;
-} Lights;
+layout (set = 1, binding = 0, std140) uniform u_lights {
+    s_light data[16];
+    uint size;
+    uint count;
+} lights;
 
-layout(set = 2, binding = 0, std140) uniform materials {
-    material Data[16];
-} Materials;
+layout (set = 2, binding = 0, std140) uniform u_materials {
+    s_material data[16];
+} materials;
 
-layout(push_constant) uniform push_constants {
-    vec3 ViewPosition;
-    int Mode;
-} PushConstants;
+layout (push_constant) uniform push_consts_u {
+    vec3 view_pos;
+    int mode;
+} push_consts;
 
-layout(location = 0) out vec4 OutColor;
+layout (location = 0) out vec4 out_color;
 
-float attenuation(light Light, float DistanceToLight) {
-    // Fatt = 1.0 / (Kc + Kl ∗ d + Kq ∗ d^2)
-    return 1 / (1.0 + (Light.Linear * DistanceToLight) + (Light.Quadratic * pow(DistanceToLight, 2)));
+float attenuation(s_light light, float dist_to_light) {
+    // Fatt = 1.0 / (Kc + Kl∗d + Kq∗d^2)
+    return 1 / (1.0 + (light.linear * dist_to_light) + (light.quadratic * pow(dist_to_light, 2)));
 }
 
 void main() {
-    fragment Fragment;
-    Fragment.Albedo = vec4(subpassLoad(AlbedoInput).rgb, 1);
-    Fragment.Position = subpassLoad(PositionInput).rgb;
-    Fragment.Normal = subpassLoad(NormalInput).rgb;
-    Fragment.MaterialIndex = subpassLoad(MaterialIndexInput).r;
-    switch(PushConstants.Mode) {
+    s_fragment frag;
+    frag.albedo = vec4(subpassLoad(in_albedo).rgb, 1);
+    frag.position = subpassLoad(in_position).rgb;
+    frag.normal = subpassLoad(in_normal).rgb;
+    frag.mat_idx = subpassLoad(in_mat_idx).r;
+    switch(push_consts.mode) {
         case MODE_COMPOSITE: {
-            vec4 FinalColor = vec4(0);
-            material Material = Materials.Data[Fragment.MaterialIndex];
-            for(uint LightIndex = 0; LightIndex < Lights.Count; ++LightIndex) {
-                light Light = Lights.Data[LightIndex];
-                vec4 LightColor = Light.Color * Light.Intensity;
-                vec3 LightDirection = normalize(Light.Position.xyz - Fragment.Position);
+            vec4 final_color = vec4(0);
+            s_material mat = materials.data[frag.mat_idx];
+            for(uint LightIndex = 0; LightIndex < lights.count; ++LightIndex) {
+                s_light light = lights.data[LightIndex];
+                vec4 light_color = light.color * light.intensity;
+                vec3 light_dir = normalize(light.position.xyz - frag.position);
 
-                // Ambient
-                vec4 Ambient = Fragment.Albedo * LightColor * vec4(vec3(0.2), 1);
+                ////////////////////////////////////////////////////////////
+                /// Ambient
+                ////////////////////////////////////////////////////////////
+                vec4 ambient = frag.albedo * light_color * vec4(vec3(0.2), 1);
 
-                // Diffuse
-                float DiffuseValue = max(dot(Fragment.Normal, LightDirection), 0.0);
-                vec4 Diffuse = Fragment.Albedo * LightColor * DiffuseValue;
+                ////////////////////////////////////////////////////////////
+                /// Diffuse
+                ////////////////////////////////////////////////////////////
+                float diffuse_val = max(dot(frag.normal, light_dir), 0.0);
+                vec4 diffuse = frag.albedo * light_color * diffuse_val;
 
-                // Specular
-                vec3 ViewDirection = normalize(PushConstants.ViewPosition - Fragment.Position);
-
-                // // Phong
-                // vec3 ReflectDirection = reflect(-LightDirection, Fragment.Normal);
-                // float SpecularValue = pow(max(dot(ViewDirection, ReflectDirection), 0.0), Material.ShineExponent);
-
+                ////////////////////////////////////////////////////////////
+                /// Specular
+                ////////////////////////////////////////////////////////////
+                vec3 view_dir = normalize(push_consts.view_pos - frag.position);
+#if 0
+                // Phong
+                vec3 reflect_dir = reflect(-light_dir, frag.normal);
+                float specular_val = pow(max(dot(view_dir, reflect_dir), 0.0), mat.shine_exponent);
+#else
                 // Blinn-Phong
-                vec3 HalfDirection = normalize(LightDirection + ViewDirection);
-                float SpecularValue = pow(max(dot(Fragment.Normal, HalfDirection), 0.0), Material.ShineExponent);
+                vec3 half_dir = normalize(light_dir + view_dir);
+                float specular_val = pow(max(dot(frag.normal, half_dir), 0.0), mat.shine_exponent);
+#endif
+                vec4 specular = frag.albedo.a * light_color * specular_val * mat.specular_intensity;
 
-                vec4 Specular = Fragment.Albedo.a * LightColor * SpecularValue * DiffuseValue * Material.SpecularIntensity;
-
-                FinalColor += (Diffuse + Specular + Ambient) * attenuation(Light, distance(Light.Position, Fragment.Position));
+                ////////////////////////////////////////////////////////////
+                /// Final
+                ////////////////////////////////////////////////////////////
+                final_color += (diffuse + specular + ambient) * attenuation(light, distance(light.position, frag.position));
             }
-            OutColor = FinalColor;
+            out_color = final_color;
             break;
         }
         case MODE_ALBEDO: {
-            OutColor = Fragment.Albedo;
+            out_color = frag.albedo;
             break;
         }
         case MODE_POSITION: {
-            OutColor = vec4(Fragment.Position / 16, 1);
-            OutColor.y *= -1;
+            out_color = vec4(frag.position / 16, 1);
+            out_color.y *= -1;
             break;
         }
         case MODE_NORMAL: {
-            OutColor = vec4(Fragment.Normal, 1);
-            OutColor.y *= -1;
+            out_color = vec4(frag.normal, 1);
+            out_color.y *= -1;
             break;
         }
         default: {
-            OutColor = vec4(0.51, 0.96, 0.17, 1);
+            out_color = vec4(0.51, 0.96, 0.17, 1);
         }
     }
 }
