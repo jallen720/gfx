@@ -29,7 +29,8 @@ struct light {
     f32 Linear;
     f32 Quadratic;
     f32 Intensity;
-    char Pad[8];
+    f32 AmbientIntensity;
+    char Pad[4];
 };
 
 struct entity {
@@ -58,8 +59,7 @@ struct lighting_push_constants {
 
 struct material {
     u32 ShineExponent;
-    f32 SpecularIntensity;
-    char Pad[8];
+    char Pad[12];
 };
 
 struct control_state {
@@ -169,25 +169,21 @@ static light *push_light(scene *Scene, u32 AttenuationIndex, transform** LightTr
 }
 
 static void create_test_assets(state *State) {
-    {
-        material *Material = ctk::push(&State->Materials, "test0");
-        Material->ShineExponent = 4;
-        Material->SpecularIntensity = 0.0f;
-    }
-    {
-        material *Material = ctk::push(&State->Materials, "test1");
-        Material->ShineExponent = 256;
-        Material->SpecularIntensity = 1.0f;
-    }
-    {
-        material *Material = ctk::push(&State->Materials, "test2");
-        Material->ShineExponent = 1024;
-        Material->SpecularIntensity = 1.0f;
-    }
+    // {
+    //     material *Material = ctk::push(&State->Materials, "test0");
+    //     Material->ShineExponent = 4;
+    // }
+    // {
+    //     material *Material = ctk::push(&State->Materials, "test1");
+    //     Material->ShineExponent = 256;
+    // }
+    // {
+    //     material *Material = ctk::push(&State->Materials, "test2");
+    //     Material->ShineExponent = 1024;
+    // }
     {
         material *Material = ctk::push(&State->Materials, "blinn_phong");
-        Material->ShineExponent = 4;
-        Material->SpecularIntensity = 1.0f;
+        Material->ShineExponent = 64;
     }
 }
 
@@ -809,6 +805,7 @@ static void create_scene(state *State, assets *Assets, vulkan_instance *VulkanIn
         *LightTransform = load_transform(ctk::at(LightData, "transform"));
         Light->Color = load_vec4(ctk::at(LightData, "color"));
         Light->Intensity = ctk::to_f32(LightData, "intensity");
+        Light->AmbientIntensity = ctk::to_f32(LightData, "ambient_intensity");
         set_attenuation_values(Light, AttenuationIndex);
     }
 
@@ -1069,14 +1066,10 @@ static void draw_ui(ui *UI, state *State, window *win) {
             }
             list_box_end();
         } else {
-            if (list_box_begin("2", NULL, State->Materials.Count)) {
-                for (u32 i = 0; i < State->Materials.Count; ++i) {
-                    char Name[16] = {};
-                    sprintf(Name, "material %u", i);
-                    if (ImGui::Selectable(Name, i == ControlState->MaterialIndex))
+            if (list_box_begin("2", NULL, State->Materials.Count))
+                for (u32 i = 0; i < State->Materials.Count; ++i)
+                    if (ImGui::Selectable(State->Materials.Keys[i], i == ControlState->MaterialIndex))
                         ControlState->MaterialIndex = i;
-                }
-            }
             list_box_end();
         }
 
@@ -1089,6 +1082,7 @@ static void draw_ui(ui *UI, state *State, window *win) {
             transform_control(Scene->LightTransforms + ControlState->LightIndex);
             separator();
             ImGui::SliderFloat("intensity", &Light->Intensity, 0.0f, 1.0f);
+            ImGui::SliderFloat("ambient intensity", &Light->AmbientIntensity, 0.0f, 1.0f);
             s32 *attenuation_index = (s32 *)(Scene->LightAttenuationIndexes + ControlState->LightIndex);
             if (ImGui::SliderInt("attenuation index", attenuation_index, 0, ATTENUATION_VALUE_COUNT - 1))
                 set_attenuation_values(Light, *attenuation_index);
@@ -1099,9 +1093,6 @@ static void draw_ui(ui *UI, state *State, window *win) {
         } else if (ControlState->Mode == control_state::MODE_MATERIAL) {
             struct material *material = State->Materials.Values + ControlState->MaterialIndex;
             ImGui::SliderInt("shine exponent", (s32 *)&material->ShineExponent, 4, 1024);
-            ImGui::PushItemWidth(50);
-            ImGui::DragFloat("specular intensity", &material->SpecularIntensity, 0.01f, 0.0f, 10.0f);
-            ImGui::PopItemWidth();
         }
     }
     window_end();

@@ -539,7 +539,7 @@ static ui* create_ui(window* Window, vulkan_instance* VulkanInstance) {
     *UI = {};
     ImGui::CreateContext();
     UI->IO = &ImGui::GetIO();
-    if(!ImGui_ImplGlfw_InitForVulkan(Window->Handle, true /* install cbs so imgui can handle glfw input */)) {
+    if (!ImGui_ImplGlfw_InitForVulkan(Window->Handle, true /* install cbs so imgui can handle glfw input */)) {
         CTK_FATAL("failed to init imgui glfw for vulkan")
     }
 

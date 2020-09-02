@@ -23,6 +23,10 @@ textures {
         path assets/textures/tiles.png
         filter VK_FILTER_LINEAR
     }
+    wood {
+        path assets/textures/wood.png
+        filter VK_FILTER_LINEAR
+    }
 }
 shader_modules {
     # Shared

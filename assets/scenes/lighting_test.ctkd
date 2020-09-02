@@ -1,7 +1,7 @@
 camera {
     transform {
-        position [ 0 -4 0 ]
-        rotation [ 45 -45 0 ]
+        position [ 10 -3 22 ]
+        rotation [ 40 -160 0 ]
         scale [ 1 1 1 ]
     }
     field_of_view 90
@@ -19,23 +19,23 @@ entities {
     #     mesh sibenik
     #     material test0
     # }
-    cube {
-        transform {
-            position [ 1 2.5 1 ]
-            rotation [ 0 0 0 ]
-            scale [ 4 4 4 ]
-        }
-        texture grass_cube
-        mesh cube
-        material test1
-    }
+    # cube {
+    #     transform {
+    #         position [ 1 2.5 1 ]
+    #         rotation [ 0 0 0 ]
+    #         scale [ 4 4 4 ]
+    #     }
+    #     texture grass_cube
+    #     mesh cube
+    #     material test1
+    # }
     quad {
         transform {
             position [ 0 0 0 ]
             rotation [ -90 0 0 ]
-            scale [ 16 16 1 ]
+            scale [ 32 32 1 ]
         }
-        texture grass
+        texture wood
         mesh quad
         material blinn_phong
     }
@@ -46,16 +46,40 @@ lights [
     #     color [ 1 0 1 1 ]
     #     attenuation_index 3
     #     intensity 1
+    #     ambient_intensity 0.2
     # }
     {
-        transform { position [ 5 -3 5 ] }
+        transform { position [ 8 -0.5 16 ] }
         color [ 1 1 1 1 ]
         attenuation_index 3
         intensity 1
+        ambient_intensity 0
+    }
+    {
+        transform { position [ 10 -0.5 16 ] }
+        color [ 1 1 1 1 ]
+        attenuation_index 3
+        intensity 0.75
+        ambient_intensity 0
+    }
+    {
+        transform { position [ 12 -0.5 16 ] }
+        color [ 1 1 1 1 ]
+        attenuation_index 3
+        intensity 0.5
+        ambient_intensity 0
+    }
+    {
+        transform { position [ 14 -0.5 16 ] }
+        color [ 1 1 1 1 ]
+        attenuation_index 3
+        intensity 0.25
+        ambient_intensity 0
     }
     # {
     #     transform { position [ 27 -24 24 ] }
     #     color [ 1 1 1 1 ]
     #     attenuation_index 8
+    #     ambient_intensity 0.2
     # }
 ]
