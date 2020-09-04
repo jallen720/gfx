@@ -8,15 +8,11 @@
 
 struct Light {
     vec4 color;
-    // vec3 dir;
-    // int mode;
     vec3 position;
     float linear;
     float quadratic;
     float intensity;
     float ambient_intensity;
-    // float cutoff;
-    // float outer_cutoff;
 };
 
 struct Material {
@@ -57,8 +53,7 @@ float attenuation(Light light, float light_distance) {
     return 1.0 / (1.0 + (light.linear * light_distance) + (light.quadratic * pow(light_distance, 2)));
 }
 
-vec3 example_blinn_phong(Fragment fragment, Light light, Material material)
-{
+vec3 example_blinn_phong(Fragment fragment, Light light, Material material) {
     vec3 lightColor = light.color.rgb * light.intensity;
     vec3 lightPos = light.position;
 
@@ -117,19 +112,7 @@ void main() {
             Material material = materials.data[fragment.material_index];
             for (uint light_index = 0; light_index < lights.count; ++light_index) {
                 Light light = lights.data[light_index];
-                if (gl_FragCoord.x < 800) {
-                    if (gl_FragCoord.y < 2) {
-                        out_color = vec4(1, 0, 0, 1);
-                        return;
-                    }
-                    total_light_color += my_blinn_phong(fragment, light, material);
-                } else {
-                    if (gl_FragCoord.y < 2) {
-                        out_color = vec4(0, 0, 1, 1);
-                        return;
-                    }
-                    total_light_color += vec4(example_blinn_phong(fragment, light, material), 1);
-                }
+                total_light_color += my_blinn_phong(fragment, light, material);
             }
             out_color = fragment.albedo * total_light_color;
             break;
@@ -152,4 +135,32 @@ void main() {
             out_color = vec4(0.51, 0.96, 0.17, 1);
         }
     }
+}
+
+vec4 my_blinn_phong_v0(Fragment fragment, Light light, Material material) {
+    vec4 light_color = light.color * light.intensity;
+    vec3 light_direction = normalize(light.position - fragment.position);
+
+    // Ambient
+    vec4 ambient = light_color * vec4(vec3(light.ambient_intensity), 1);
+
+    // Diffuse
+    float diffuse_value = max(dot(fragment.normal, light_direction), 0.0);
+    vec4 diffuse = light_color * diffuse_value;
+
+    // Specular
+    vec3 view_direction = normalize(push_constants.view_position - fragment.position);
+#if 0
+    // Phong
+    vec3 reflect_direction = reflect(-light_direction, fragment.normal);
+    float specular_value = pow(max(dot(view_direction, reflect_direction), 0.0), material.shine_exponent);
+#else
+    // Blinn-Phong
+    vec3 half_direction = normalize(light_direction + view_direction);
+    float specular_value = pow(max(dot(fragment.normal, half_direction), 0.0), material.shine_exponent);
+#endif
+    vec4 specular = fragment.albedo.a * light_color * specular_value;
+
+    // Final
+    return (diffuse + specular + ambient) * attenuation(light, distance(light.position, fragment.position));
 }

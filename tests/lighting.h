@@ -785,7 +785,7 @@ static void create_scene(state *State, assets *Assets, vulkan_instance *VulkanIn
 
     // EntityMatrixes
     ctk::data *EntityMap = ctk::at(&SceneData, "entities");
-    for(u32 EntityIndex = 0; EntityIndex < EntityMap->Children.Count; ++EntityIndex) {
+    for (u32 EntityIndex = 0; EntityIndex < EntityMap->Children.Count; ++EntityIndex) {
         ctk::data *EntityData = ctk::at(EntityMap, EntityIndex);
         entity *Entity = push_entity(Scene, EntityData->Key.Data);
         Entity->Transform = load_transform(ctk::at(EntityData, "transform"));
@@ -797,7 +797,7 @@ static void create_scene(state *State, assets *Assets, vulkan_instance *VulkanIn
 
     // Lights
     ctk::data *LightArray = ctk::at(&SceneData, "lights");
-    for(u32 LightIndex = 0; LightIndex < LightArray->Children.Count; ++LightIndex) {
+    for (u32 LightIndex = 0; LightIndex < LightArray->Children.Count; ++LightIndex) {
         ctk::data *LightData = ctk::at(LightArray, LightIndex);
         u32 AttenuationIndex = ctk::to_u32(LightData, "attenuation_index");
         transform *LightTransform = NULL;
@@ -856,7 +856,7 @@ static void record_render_command_buffer(vulkan_instance *VulkanInstance, assets
         {
             vtk::graphics_pipeline *DeferredGP = &State->GraphicsPipelines.Deferred;
             vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.EntityMatrixes };
-            for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
+            for (u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
                 entity *Entity = Scene->Entities.Values + EntityIndex;
                 VkDescriptorSet *TextureDS = Entity->TextureDS->Instances + 0;
                 mesh *Mesh = Entity->Mesh;
@@ -930,10 +930,10 @@ static void record_render_command_buffer(vulkan_instance *VulkanInstance, assets
 }
 
 static void update_entity_matrixes(VkDevice LogicalDevice, scene *Scene, glm::mat4 ViewProjectionMatrix, vtk::region *Region) {
-    if(Scene->Entities.Count == 0) return;
+    if (Scene->Entities.Count == 0) return;
 
     // Entity Model Matrixes
-    for(u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
+    for (u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
         transform *EntityTransform = &Scene->Entities.Values[EntityIndex].Transform;
         matrix_ubo *EntityMatrixUBO = Scene->EntityMatrixUBOs + EntityIndex;
         glm::mat4 ModelMatrix(1.0f);
@@ -951,9 +951,9 @@ static void update_entity_matrixes(VkDevice LogicalDevice, scene *Scene, glm::ma
 
 static void update_lights(VkDevice LogicalDevice, state *State, glm::mat4 ViewProjectionMatrix, u32 SwapchainImageIndex) {
     scene *Scene = &State->Scene;
-    if(Scene->Lights.Count == 0) return;
+    if (Scene->Lights.Count == 0) return;
 
-    for(u32 LightIndex = 0; LightIndex < Scene->Lights.Count; ++LightIndex) {
+    for (u32 LightIndex = 0; LightIndex < Scene->Lights.Count; ++LightIndex) {
         ctk::vec3<f32>* LightPosition = &Scene->Lights[LightIndex].Position;
         matrix_ubo *LightMatrixUBO = Scene->LightMatrixUBOs + LightIndex;
         transform *LightTransform = Scene->LightTransforms + LightIndex;
