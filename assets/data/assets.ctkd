@@ -126,6 +126,14 @@ shader_modules {
         path assets/shaders/lighting/lighting.frag.spv
         stage VK_SHADER_STAGE_FRAGMENT_BIT
     }
+    shadow_map_vert {
+        path assets/shaders/lighting/shadow_map.vert.spv
+        stage VK_SHADER_STAGE_VERTEX_BIT
+    }
+    shadow_map_frag {
+        path assets/shaders/lighting/shadow_map.frag.spv
+        stage VK_SHADER_STAGE_FRAGMENT_BIT
+    }
 }
 models {
     cube { path assets/models/cube.obj }
@@ -134,4 +142,5 @@ models {
     sibenik { path assets/models/sibenik/sibenik.obj }
     fullscreen_plane { path assets/models/fullscreen_plane.obj }
     light_diamond { path assets/models/light_diamond.obj }
+    direction_pyramid { path assets/models/direction_pyramid.obj }
 }

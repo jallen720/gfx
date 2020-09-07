@@ -31,13 +31,15 @@ layout (set = 0, binding = 1, input_attachment_index = 1) uniform subpassInput i
 layout (set = 0, binding = 2, input_attachment_index = 2) uniform subpassInput in_normal;
 layout (set = 0, binding = 3, input_attachment_index = 3) uniform usubpassInput in_material_index;
 
-layout (set = 1, binding = 0, std140) uniform Lights {
+layout (set = 1, binding = 0) uniform sampler2D shadow_map;
+
+layout (set = 2, binding = 0, std140) uniform Lights {
     Light data[16];
     uint size;
     uint count;
 } lights;
 
-layout (set = 2, binding = 0, std140) uniform Materials {
+layout (set = 3, binding = 0, std140) uniform Materials {
     Material data[16];
 } materials;
 
@@ -101,6 +103,8 @@ vec4 my_blinn_phong(Fragment fragment, Light light, Material material) {
 }
 
 void main() {
+    out_color = vec4(vec3(texture(shadow_map, gl_FragCoord.xy).r), 1);
+    return;
     Fragment fragment;
     fragment.albedo = vec4(subpassLoad(in_albedo).rgb, 1);
     fragment.position = subpassLoad(in_position).rgb;

@@ -8,7 +8,8 @@
 // #include "gfx/tests/stencil.h"
 // #include "gfx/tests/input_attachments.h"
 // #include "gfx/tests/depth_peeling.h"
-#include "gfx/tests/lighting.h"
+// #include "gfx/tests/lighting.h"
+#include "gfx/tests/barriers.h"
 
 ////////////////////////////////////////////////////////////
 /// Main

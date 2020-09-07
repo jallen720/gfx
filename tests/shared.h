@@ -307,7 +307,7 @@ static vulkan_instance* create_vulkan_instance(window* Window) {
     *Device = vtk::create_device(Instance->Handle,* PlatformSurface, &DeviceInfo);
 
     // Swapchain
-    *Swapchain = vtk::create_swapchain(Device,* PlatformSurface);
+    *Swapchain = vtk::create_swapchain(Device, *PlatformSurface);
 
     // Graphics Command Pool
     *GraphicsCommandPool = vtk::create_command_pool(Device->Logical, Device->QueueFamilyIndexes.Graphics);
@@ -437,7 +437,7 @@ static u32 aquire_next_swapchain_image_index(vulkan_instance* VulkanInstance) {
     return SwapchainImageIndex;
 }
 
-static glm::mat4 view_projection_matrix(camera* Camera) {
+static glm::mat4 camera_view_projection_matrix(camera* Camera) {
     transform* CameraTransform = &Camera->Transform;
 
     // View Matrix
@@ -472,7 +472,7 @@ static void synchronize_current_frame(vulkan_instance* VulkanInstance, u32 Swapc
     *PreviousFrameInFlightFence = CurrentFrame->InFlightFence;
 }
 
-static void submit_render_passes(vulkan_instance* VulkanInstance, vtk::render_pass** RenderPasses, u32 RenderPassCount, u32 SwapchainImageIndex) {
+static void submit_render_pass_command_buffers(vulkan_instance* VulkanInstance, VkCommandBuffer *CommandBuffers, u32 CommandBufferCount, u32 SwapchainImageIndex) {
     vtk::device* Device = &VulkanInstance->Device;
     vtk::swapchain* Swapchain = &VulkanInstance->Swapchain;
     vtk::frame_state* FrameState = &VulkanInstance->FrameState;
@@ -484,16 +484,14 @@ static void submit_render_passes(vulkan_instance* VulkanInstance, vtk::render_pa
     VkSemaphore WaitSemaphores[] = { CurrentFrame->ImageAquiredSemaphore };
     VkPipelineStageFlags WaitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
     VkSemaphore SignalSemaphores[] = { CurrentFrame->RenderFinishedSemaphore };
-    ctk::sarray<VkCommandBuffer, 4> CommandBuffers = {};
-    CTK_ITERATE(RenderPassCount) ctk::push(&CommandBuffers, RenderPasses[IterationIndex]->CommandBuffers[SwapchainImageIndex]);
 
     VkSubmitInfo SubmitInfos[1] = {};
     SubmitInfos[0].sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     SubmitInfos[0].waitSemaphoreCount = CTK_ARRAY_COUNT(WaitSemaphores);
     SubmitInfos[0].pWaitSemaphores = WaitSemaphores;
     SubmitInfos[0].pWaitDstStageMask = WaitStages;
-    SubmitInfos[0].commandBufferCount = CommandBuffers.Count;
-    SubmitInfos[0].pCommandBuffers = CommandBuffers.Data;
+    SubmitInfos[0].commandBufferCount = CommandBufferCount;
+    SubmitInfos[0].pCommandBuffers = CommandBuffers;
     SubmitInfos[0].signalSemaphoreCount = CTK_ARRAY_COUNT(SignalSemaphores);
     SubmitInfos[0].pSignalSemaphores = SignalSemaphores;
 
@@ -638,7 +636,7 @@ static void ui_new_frame() {
     ImGui::NewFrame();
 }
 
-static void record_ui_command_buffer(vulkan_instance* VulkanInstance, ui* UI, u32 SwapchainImageIndex) {
+static void record_ui_render_pass(vulkan_instance* VulkanInstance, ui* UI, u32 SwapchainImageIndex) {
     vtk::render_pass* RenderPass = &UI->RenderPass;
     ImGui::Render();
 

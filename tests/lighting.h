@@ -82,9 +82,13 @@ struct control_state {
 
 struct state {
     static const u32 MAX_MATERIALS = 16;
+    static const u32 SHADOW_MAP_SIZE = 1080;
     scene Scene;
     control_state ControlState;
-    vtk::render_pass RenderPass;
+    struct {
+        vtk::render_pass Main;
+        vtk::render_pass ShadowMap;
+    } RenderPasses;
     VkDescriptorPool DescriptorPool;
     vtk::vertex_layout VertexLayout;
     enum {
@@ -111,12 +115,14 @@ struct state {
         vtk::image Depth;
         vtk::image MaterialIndex;
     } AttachmentImages;
+    vtk::texture ShadowMaps[1];
     struct {
         VkDescriptorSetLayout EntityMatrixes;
         VkDescriptorSetLayout Lights;
         VkDescriptorSetLayout InputAttachments;
         VkDescriptorSetLayout Textures;
         VkDescriptorSetLayout Materials;
+        VkDescriptorSetLayout ShadowMaps;
     } DescriptorSetLayouts;
     struct {
         vtk::descriptor_set EntityMatrixes;
@@ -125,15 +131,23 @@ struct state {
         vtk::descriptor_set InputAttachments;
         ctk::smap<vtk::descriptor_set, 16> Textures;
         vtk::descriptor_set Materials;
+        vtk::descriptor_set ShadowMaps;
     } DescriptorSets;
     struct {
         vtk::graphics_pipeline Deferred;
         vtk::graphics_pipeline Lighting;
         vtk::graphics_pipeline UnlitColor;
+        vtk::graphics_pipeline ShadowMap;
     } GraphicsPipelines;
     struct {
         lighting_push_constants Lighting;
     } PushConstants;
+    struct {
+        VkSemaphore ShadowMapFinished;
+    } Semaphores;
+    struct {
+        VkFence ShadowMapFinished;
+    } Fences;
     ctk::smap<material, MAX_MATERIALS> Materials;
 };
 
@@ -187,206 +201,16 @@ static void create_test_assets(state *State) {
     }
 }
 
-static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, assets *Assets) {
+static void create_descriptor_sets(state *State, vulkan_instance *VulkanInstance, assets *Assets) {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
 
-    ////////////////////////////////////////////////////////////
-    /// Vertex Layout
-    ////////////////////////////////////////////////////////////
-    State->VertexAttributeIndexes.Position = vtk::push_vertex_attribute(&State->VertexLayout, 3);
-    State->VertexAttributeIndexes.Normal = vtk::push_vertex_attribute(&State->VertexLayout, 3);
-    State->VertexAttributeIndexes.UV = vtk::push_vertex_attribute(&State->VertexLayout, 2);
-
-    ////////////////////////////////////////////////////////////
-    /// Buffers
-    ////////////////////////////////////////////////////////////
-    static const u32 UNIFORM_BUFFER_ARRAY_PADDING = 8;
-    State->UniformBuffers.EntityMatrixes = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device,
-                                                                      scene::MAX_ENTITIES, sizeof(matrix_ubo), Swapchain->Images.Count);
-    State->UniformBuffers.LightMatrixes = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device,
-                                                                     scene::MAX_LIGHTS, sizeof(matrix_ubo), Swapchain->Images.Count);
-    State->UniformBuffers.Lights = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device,
-                                                              1, sizeof(State->Scene.Lights) + UNIFORM_BUFFER_ARRAY_PADDING, Swapchain->Images.Count);
-    State->UniformBuffers.Materials = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device,
-                                                                 state::MAX_MATERIALS, sizeof(material), Swapchain->Images.Count);
-
-    ////////////////////////////////////////////////////////////
-    /// Attachment Images
-    ////////////////////////////////////////////////////////////
-    vtk::image_info DepthImageInfo = {};
-    DepthImageInfo.Width = Swapchain->Extent.width;
-    DepthImageInfo.Height = Swapchain->Extent.height;
-    DepthImageInfo.Format = vtk::find_depth_image_format(Device->Physical);
-    DepthImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
-    DepthImageInfo.UsageFlags = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    DepthImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    DepthImageInfo.AspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    State->AttachmentImages.Depth = vtk::create_image(Device, &DepthImageInfo);
-
-    vtk::image_info ColorImageInfo = {};
-    ColorImageInfo.Width = Swapchain->Extent.width;
-    ColorImageInfo.Height = Swapchain->Extent.height;
-    ColorImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
-    ColorImageInfo.UsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
-    ColorImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    ColorImageInfo.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    ColorImageInfo.Format = VK_FORMAT_R8G8B8A8_UNORM;
-    State->AttachmentImages.Albedo = vtk::create_image(Device, &ColorImageInfo);
-    ColorImageInfo.Format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    State->AttachmentImages.Position = vtk::create_image(Device, &ColorImageInfo);
-    State->AttachmentImages.Normal = vtk::create_image(Device, &ColorImageInfo);
-
-    vtk::image_info MaterialIndexImageInfo = {};
-    MaterialIndexImageInfo.Width = Swapchain->Extent.width;
-    MaterialIndexImageInfo.Height = Swapchain->Extent.height;
-    MaterialIndexImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
-    MaterialIndexImageInfo.UsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
-    MaterialIndexImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    MaterialIndexImageInfo.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    MaterialIndexImageInfo.Format = VK_FORMAT_R32_UINT;
-    State->AttachmentImages.MaterialIndex = vtk::create_image(Device, &MaterialIndexImageInfo);
-
-    ////////////////////////////////////////////////////////////
-    /// Render Pass
-    ////////////////////////////////////////////////////////////
-    vtk::render_pass_info RenderPassInfo = {};
-
-    // Attachments
-    vtk::attachment *AlbedoAttachment = ctk::push(&RenderPassInfo.Attachments);
-    AlbedoAttachment->Description.format = VK_FORMAT_R8G8B8A8_UNORM;
-    AlbedoAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
-    AlbedoAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    AlbedoAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    AlbedoAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    AlbedoAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    AlbedoAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    AlbedoAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    AlbedoAttachment->ClearValue = { 0, 0, 0, 1 };
-
-    vtk::attachment *PositionAttachment = ctk::push(&RenderPassInfo.Attachments);
-    PositionAttachment->Description.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    PositionAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
-    PositionAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    PositionAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    PositionAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    PositionAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    PositionAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    PositionAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    PositionAttachment->ClearValue = { 0, 0, 0, 1 };
-
-    vtk::attachment *NormalAttachment = ctk::push(&RenderPassInfo.Attachments);
-    NormalAttachment->Description.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    NormalAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
-    NormalAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    NormalAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    NormalAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    NormalAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    NormalAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    NormalAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    NormalAttachment->ClearValue = { 0, 0, 0, 1 };
-
-    vtk::attachment *DepthAttachment = ctk::push(&RenderPassInfo.Attachments);
-    DepthAttachment->Description.format = DepthImageInfo.Format;
-    DepthAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
-    DepthAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    DepthAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    DepthAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    DepthAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    DepthAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    DepthAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    DepthAttachment->ClearValue = { 1.0f, 0 };
-
-    vtk::attachment *SwapchainAttachment = ctk::push(&RenderPassInfo.Attachments);
-    SwapchainAttachment->Description.format = Swapchain->ImageFormat;
-    SwapchainAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
-    SwapchainAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    SwapchainAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    SwapchainAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    SwapchainAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    SwapchainAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    SwapchainAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    SwapchainAttachment->ClearValue = { 0, 0, 0, 1 };
-
-    vtk::attachment *MaterialIndexAttachment = ctk::push(&RenderPassInfo.Attachments);
-    MaterialIndexAttachment->Description.format = VK_FORMAT_R32_UINT;
-    MaterialIndexAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
-    MaterialIndexAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    MaterialIndexAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    MaterialIndexAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    MaterialIndexAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    MaterialIndexAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    MaterialIndexAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    MaterialIndexAttachment->ClearValue = { 0 };
-
-    // Subpasses
-    vtk::subpass *DeferredSubpass = ctk::push(&RenderPassInfo.Subpasses);
-    ctk::push(&DeferredSubpass->ColorAttachmentReferences, { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
-    ctk::push(&DeferredSubpass->ColorAttachmentReferences, { 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
-    ctk::push(&DeferredSubpass->ColorAttachmentReferences, { 2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
-    ctk::push(&DeferredSubpass->ColorAttachmentReferences, { 5, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
-    ctk::set(&DeferredSubpass->DepthAttachmentReference, { 3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
-
-    vtk::subpass *LightingSubpass = ctk::push(&RenderPassInfo.Subpasses);
-    ctk::push(&LightingSubpass->InputAttachmentReferences, { 0, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
-    ctk::push(&LightingSubpass->InputAttachmentReferences, { 1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
-    ctk::push(&LightingSubpass->InputAttachmentReferences, { 2, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
-    ctk::push(&LightingSubpass->InputAttachmentReferences, { 5, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
-    ctk::push(&LightingSubpass->ColorAttachmentReferences, { 4, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
-
-    vtk::subpass *DirectSubpass = ctk::push(&RenderPassInfo.Subpasses);
-    ctk::push(&DirectSubpass->ColorAttachmentReferences, { 4, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
-    ctk::set(&DirectSubpass->DepthAttachmentReference, { 3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
-
-    // Subpass Dependencies
-    RenderPassInfo.SubpassDependencies.Count = 3;
-    RenderPassInfo.SubpassDependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
-    RenderPassInfo.SubpassDependencies[0].dstSubpass = 0;
-    RenderPassInfo.SubpassDependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    RenderPassInfo.SubpassDependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    RenderPassInfo.SubpassDependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-    RenderPassInfo.SubpassDependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    RenderPassInfo.SubpassDependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-
-    RenderPassInfo.SubpassDependencies[1].srcSubpass = 0;
-    RenderPassInfo.SubpassDependencies[1].dstSubpass = 1;
-    RenderPassInfo.SubpassDependencies[1].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    RenderPassInfo.SubpassDependencies[1].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    RenderPassInfo.SubpassDependencies[1].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-    RenderPassInfo.SubpassDependencies[1].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    RenderPassInfo.SubpassDependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-
-    RenderPassInfo.SubpassDependencies[2].srcSubpass = 1;
-    RenderPassInfo.SubpassDependencies[2].dstSubpass = 2;
-    RenderPassInfo.SubpassDependencies[2].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    RenderPassInfo.SubpassDependencies[2].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    RenderPassInfo.SubpassDependencies[2].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-    RenderPassInfo.SubpassDependencies[2].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    RenderPassInfo.SubpassDependencies[2].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-
-    // Framebuffer Infos
-    CTK_ITERATE(Swapchain->Images.Count) {
-        vtk::framebuffer_info *FramebufferInfo = ctk::push(&RenderPassInfo.FramebufferInfos);
-        ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.Albedo.View);
-        ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.Position.View);
-        ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.Normal.View);
-        ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.Depth.View);
-        ctk::push(&FramebufferInfo->Attachments, Swapchain->Images[IterationIndex].View);
-        ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.MaterialIndex.View);
-        FramebufferInfo->Extent = Swapchain->Extent;
-        FramebufferInfo->Layers = 1;
-    }
-
-    State->RenderPass = vtk::create_render_pass(Device->Logical, VulkanInstance->GraphicsCommandPool, &RenderPassInfo);
-
-    ////////////////////////////////////////////////////////////
-    /// Descriptor Sets
-    ////////////////////////////////////////////////////////////
     vtk::descriptor_set *EntityMatrixesDS = &State->DescriptorSets.EntityMatrixes;
     vtk::descriptor_set *LightMatrixesDS = &State->DescriptorSets.LightMatrixes;
     vtk::descriptor_set *LightsDS = &State->DescriptorSets.Lights;
     vtk::descriptor_set *InputAttachmentsDS = &State->DescriptorSets.InputAttachments;
     vtk::descriptor_set *MaterialsDS = &State->DescriptorSets.Materials;
+    vtk::descriptor_set *shadow_maps_ds = &State->DescriptorSets.ShadowMaps;
 
     // Pool
     ctk::sarray<VkDescriptorPoolSize, 8> DescriptorPoolSizes = {};
@@ -403,7 +227,9 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     vtk::validate_vk_result(vkCreateDescriptorPool(Device->Logical, &DescriptorPoolCreateInfo, NULL, &State->DescriptorPool),
                             "vkCreateDescriptorPool", "failed to create descriptor pool");
 
-    // Layouts
+    ////////////////////////////////////////////////////////////
+    /// Layouts
+    ////////////////////////////////////////////////////////////
 
     // EntityMatrixes
     ctk::sarray<VkDescriptorSetLayoutBinding, 4> EntityMatrixesLayoutBindings = {};
@@ -469,7 +295,18 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
                                                         &State->DescriptorSetLayouts.Materials),
                             "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
 
-    // Allocation
+    // Shadow Maps
+    VkDescriptorSetLayoutBinding shadow_maps_binding = { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT };
+    VkDescriptorSetLayoutCreateInfo shadow_maps_layout_ci = {};
+    shadow_maps_layout_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    shadow_maps_layout_ci.bindingCount = 1;
+    shadow_maps_layout_ci.pBindings = &shadow_maps_binding;
+    vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &shadow_maps_layout_ci, NULL, &State->DescriptorSetLayouts.ShadowMaps),
+                            "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
+
+    ////////////////////////////////////////////////////////////
+    /// Allocation
+    ////////////////////////////////////////////////////////////
     ctk::sarray<VkDescriptorSetLayout, 4> EntityMatrixesDuplicateLayouts = {};
     CTK_ITERATE(Swapchain->Images.Count) ctk::push(&EntityMatrixesDuplicateLayouts, State->DescriptorSetLayouts.EntityMatrixes);
 
@@ -549,7 +386,19 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &MaterialsAllocateInfo, MaterialsDS->Instances.Data),
                             "vkAllocateDescriptorSets", "failed to allocate descriptor sets");
 
-    // Updates
+    // Shadow Maps
+    shadow_maps_ds->Instances.Count = 1;
+    VkDescriptorSetAllocateInfo shadow_maps_ds_ci = {};
+    shadow_maps_ds_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    shadow_maps_ds_ci.descriptorPool = State->DescriptorPool;
+    shadow_maps_ds_ci.descriptorSetCount = 1;
+    shadow_maps_ds_ci.pSetLayouts = &State->DescriptorSetLayouts.ShadowMaps;
+    vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &shadow_maps_ds_ci, shadow_maps_ds->Instances.Data),
+                            "vkAllocateDescriptorSets", "failed to allocate descriptor sets");
+
+    ////////////////////////////////////////////////////////////
+    /// Updates
+    ////////////////////////////////////////////////////////////
     ctk::sarray<VkDescriptorBufferInfo, 32> DescriptorBufferInfos = {};
     ctk::sarray<VkDescriptorImageInfo, 32> DescriptorImageInfos = {};
     ctk::sarray<VkWriteDescriptorSet, 32> WriteDescriptorSets = {};
@@ -707,7 +556,155 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
         MaterialsWrite->pBufferInfo = MaterialsDescriptorBufferInfo;
     }
 
+    // Shadow Maps
+    VkDescriptorImageInfo *shadow_map_img_info = ctk::push(&DescriptorImageInfos);
+    shadow_map_img_info->sampler = State->ShadowMaps[0].Sampler;
+    shadow_map_img_info->imageView = State->ShadowMaps[0].Image.View;
+    shadow_map_img_info->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet *shadow_maps_write = ctk::push(&WriteDescriptorSets);
+    shadow_maps_write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    shadow_maps_write->dstSet = shadow_maps_ds->Instances[0];
+    shadow_maps_write->dstBinding = 0;
+    shadow_maps_write->dstArrayElement = 0;
+    shadow_maps_write->descriptorCount = 1;
+    shadow_maps_write->descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    shadow_maps_write->pImageInfo = shadow_map_img_info;
+
     vkUpdateDescriptorSets(Device->Logical, WriteDescriptorSets.Count, WriteDescriptorSets.Data, 0, NULL);
+}
+
+static void create_main_render_pass(state *State, vulkan_instance *VulkanInstance, assets *Assets) {
+    vtk::device *Device = &VulkanInstance->Device;
+    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+    vtk::render_pass_info RenderPassInfo = {};
+
+    // Attachments
+    vtk::attachment *AlbedoAttachment = ctk::push(&RenderPassInfo.Attachments);
+    AlbedoAttachment->Description.format = VK_FORMAT_R8G8B8A8_UNORM;
+    AlbedoAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
+    AlbedoAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    AlbedoAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    AlbedoAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    AlbedoAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    AlbedoAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    AlbedoAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    AlbedoAttachment->ClearValue = { 0, 0, 0, 1 };
+
+    vtk::attachment *PositionAttachment = ctk::push(&RenderPassInfo.Attachments);
+    PositionAttachment->Description.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    PositionAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
+    PositionAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    PositionAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    PositionAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    PositionAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    PositionAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    PositionAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    PositionAttachment->ClearValue = { 0, 0, 0, 1 };
+
+    vtk::attachment *NormalAttachment = ctk::push(&RenderPassInfo.Attachments);
+    NormalAttachment->Description.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    NormalAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
+    NormalAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    NormalAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    NormalAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    NormalAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    NormalAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    NormalAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    NormalAttachment->ClearValue = { 0, 0, 0, 1 };
+
+    vtk::attachment *DepthAttachment = ctk::push(&RenderPassInfo.Attachments);
+    DepthAttachment->Description.format = State->AttachmentImages.Depth.Format;
+    DepthAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
+    DepthAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    DepthAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    DepthAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    DepthAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    DepthAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    DepthAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    DepthAttachment->ClearValue = { 1.0f, 0 };
+
+    vtk::attachment *SwapchainAttachment = ctk::push(&RenderPassInfo.Attachments);
+    SwapchainAttachment->Description.format = Swapchain->ImageFormat;
+    SwapchainAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
+    SwapchainAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    SwapchainAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    SwapchainAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    SwapchainAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    SwapchainAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    SwapchainAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    SwapchainAttachment->ClearValue = { 0, 0, 0, 1 };
+
+    vtk::attachment *MaterialIndexAttachment = ctk::push(&RenderPassInfo.Attachments);
+    MaterialIndexAttachment->Description.format = VK_FORMAT_R32_UINT;
+    MaterialIndexAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
+    MaterialIndexAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    MaterialIndexAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    MaterialIndexAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    MaterialIndexAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    MaterialIndexAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    MaterialIndexAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    MaterialIndexAttachment->ClearValue = { 0 };
+
+    // Subpasses
+    vtk::subpass *DeferredSubpass = ctk::push(&RenderPassInfo.Subpasses);
+    ctk::push(&DeferredSubpass->ColorAttachmentReferences, { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+    ctk::push(&DeferredSubpass->ColorAttachmentReferences, { 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+    ctk::push(&DeferredSubpass->ColorAttachmentReferences, { 2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+    ctk::push(&DeferredSubpass->ColorAttachmentReferences, { 5, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+    ctk::set(&DeferredSubpass->DepthAttachmentReference, { 3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
+
+    vtk::subpass *LightingSubpass = ctk::push(&RenderPassInfo.Subpasses);
+    ctk::push(&LightingSubpass->InputAttachmentReferences, { 0, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
+    ctk::push(&LightingSubpass->InputAttachmentReferences, { 1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
+    ctk::push(&LightingSubpass->InputAttachmentReferences, { 2, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
+    ctk::push(&LightingSubpass->InputAttachmentReferences, { 5, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
+    ctk::push(&LightingSubpass->ColorAttachmentReferences, { 4, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+
+    vtk::subpass *DirectSubpass = ctk::push(&RenderPassInfo.Subpasses);
+    ctk::push(&DirectSubpass->ColorAttachmentReferences, { 4, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+    ctk::set(&DirectSubpass->DepthAttachmentReference, { 3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
+
+    // Subpass Dependencies
+    RenderPassInfo.SubpassDependencies.Count = 3;
+    RenderPassInfo.SubpassDependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    RenderPassInfo.SubpassDependencies[0].dstSubpass = 0;
+    RenderPassInfo.SubpassDependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    RenderPassInfo.SubpassDependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    RenderPassInfo.SubpassDependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    RenderPassInfo.SubpassDependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    RenderPassInfo.SubpassDependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    RenderPassInfo.SubpassDependencies[1].srcSubpass = 0;
+    RenderPassInfo.SubpassDependencies[1].dstSubpass = 1;
+    RenderPassInfo.SubpassDependencies[1].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    RenderPassInfo.SubpassDependencies[1].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    RenderPassInfo.SubpassDependencies[1].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    RenderPassInfo.SubpassDependencies[1].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    RenderPassInfo.SubpassDependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    RenderPassInfo.SubpassDependencies[2].srcSubpass = 1;
+    RenderPassInfo.SubpassDependencies[2].dstSubpass = 2;
+    RenderPassInfo.SubpassDependencies[2].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    RenderPassInfo.SubpassDependencies[2].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    RenderPassInfo.SubpassDependencies[2].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    RenderPassInfo.SubpassDependencies[2].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    RenderPassInfo.SubpassDependencies[2].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    // Framebuffer Infos
+    CTK_ITERATE(Swapchain->Images.Count) {
+        vtk::framebuffer_info *FramebufferInfo = ctk::push(&RenderPassInfo.FramebufferInfos);
+        ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.Albedo.View);
+        ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.Position.View);
+        ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.Normal.View);
+        ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.Depth.View);
+        ctk::push(&FramebufferInfo->Attachments, Swapchain->Images[IterationIndex].View);
+        ctk::push(&FramebufferInfo->Attachments, State->AttachmentImages.MaterialIndex.View);
+        FramebufferInfo->Extent = Swapchain->Extent;
+        FramebufferInfo->Layers = 1;
+    }
+
+    State->RenderPasses.Main = vtk::create_render_pass(Device->Logical, VulkanInstance->GraphicsCommandPool, &RenderPassInfo);
 
     ////////////////////////////////////////////////////////////
     /// Graphics Pipelines
@@ -731,12 +728,13 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     DeferredGPInfo.DepthStencilState.depthTestEnable = VK_TRUE;
     DeferredGPInfo.DepthStencilState.depthWriteEnable = VK_TRUE;
     DeferredGPInfo.DepthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-    State->GraphicsPipelines.Deferred = vtk::create_graphics_pipeline(Device->Logical, &State->RenderPass, 0, &DeferredGPInfo);
+    State->GraphicsPipelines.Deferred = vtk::create_graphics_pipeline(Device->Logical, &State->RenderPasses.Main, 0, &DeferredGPInfo);
 
     vtk::graphics_pipeline_info LightingGPInfo = vtk::default_graphics_pipeline_info();
     ctk::push(&LightingGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "lighting_lighting_vert"));
     ctk::push(&LightingGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "lighting_lighting_frag"));
     ctk::push(&LightingGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.InputAttachments);
+    ctk::push(&LightingGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.ShadowMaps);
     ctk::push(&LightingGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.Lights);
     ctk::push(&LightingGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.Materials);
     ctk::push(&LightingGPInfo.PushConstantRanges, { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(lighting_push_constants) });
@@ -745,7 +743,7 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     ctk::push(&LightingGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
     ctk::push(&LightingGPInfo.Scissors, { 0, 0, Swapchain->Extent.width, Swapchain->Extent.height });
     ctk::push(&LightingGPInfo.ColorBlendAttachmentStates, vtk::default_color_blend_attachment_state());
-    State->GraphicsPipelines.Lighting = vtk::create_graphics_pipeline(Device->Logical, &State->RenderPass, 1, &LightingGPInfo);
+    State->GraphicsPipelines.Lighting = vtk::create_graphics_pipeline(Device->Logical, &State->RenderPasses.Main, 1, &LightingGPInfo);
 
     vtk::graphics_pipeline_info UnlitColorGPInfo = vtk::default_graphics_pipeline_info();
     ctk::push(&UnlitColorGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "unlit_color_vert"));
@@ -760,7 +758,147 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     UnlitColorGPInfo.DepthStencilState.depthTestEnable = VK_TRUE;
     UnlitColorGPInfo.DepthStencilState.depthWriteEnable = VK_TRUE;
     UnlitColorGPInfo.DepthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-    State->GraphicsPipelines.UnlitColor = vtk::create_graphics_pipeline(Device->Logical, &State->RenderPass, 2, &UnlitColorGPInfo);
+    State->GraphicsPipelines.UnlitColor = vtk::create_graphics_pipeline(Device->Logical, &State->RenderPasses.Main, 2, &UnlitColorGPInfo);
+}
+
+static void create_shadow_map_render_pass(state *State, vulkan_instance *VulkanInstance, assets *Assets) {
+    vtk::device *Device = &VulkanInstance->Device;
+    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+    vtk::render_pass_info RenderPassInfo = {};
+
+    // Attachments
+    vtk::attachment *DepthAttachment = ctk::push(&RenderPassInfo.Attachments);
+    DepthAttachment->Description.format = State->AttachmentImages.Depth.Format;
+    DepthAttachment->Description.samples = VK_SAMPLE_COUNT_1_BIT;
+    DepthAttachment->Description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    DepthAttachment->Description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    DepthAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    DepthAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    DepthAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    DepthAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    DepthAttachment->ClearValue = { 1.0f, 0 };
+
+    // Subpasses
+    vtk::subpass *Subpass = ctk::push(&RenderPassInfo.Subpasses);
+    ctk::set(&Subpass->DepthAttachmentReference, { 0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
+
+    // Subpass Dependencies
+    RenderPassInfo.SubpassDependencies.Count = 1;
+    RenderPassInfo.SubpassDependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    RenderPassInfo.SubpassDependencies[0].dstSubpass = 0;
+    RenderPassInfo.SubpassDependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    RenderPassInfo.SubpassDependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    RenderPassInfo.SubpassDependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    RenderPassInfo.SubpassDependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    RenderPassInfo.SubpassDependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    // Framebuffer Infos
+    vtk::framebuffer_info *FramebufferInfo = ctk::push(&RenderPassInfo.FramebufferInfos);
+    ctk::push(&FramebufferInfo->Attachments, State->ShadowMaps[0].Image.View);
+    FramebufferInfo->Extent = { state::SHADOW_MAP_SIZE, state::SHADOW_MAP_SIZE };
+    FramebufferInfo->Layers = 1;
+
+    State->RenderPasses.ShadowMap = vtk::create_render_pass(Device->Logical, VulkanInstance->GraphicsCommandPool, &RenderPassInfo);
+
+    // Graphics Pipeline
+    vtk::graphics_pipeline_info ShadowMapGPInfo = vtk::default_graphics_pipeline_info();
+    ctk::push(&ShadowMapGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "shadow_map_vert"));
+    ctk::push(&ShadowMapGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "shadow_map_frag"));
+    ctk::push(&ShadowMapGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.EntityMatrixes);
+    ctk::push(&ShadowMapGPInfo.VertexInputs, { 0, 0, State->VertexAttributeIndexes.Position });
+    ShadowMapGPInfo.VertexLayout = &State->VertexLayout;
+    ctk::push(&ShadowMapGPInfo.Viewports, { 0, 0, (f32)state::SHADOW_MAP_SIZE, (f32)state::SHADOW_MAP_SIZE, 0, 1 });
+    ctk::push(&ShadowMapGPInfo.Scissors, { 0, 0, state::SHADOW_MAP_SIZE, state::SHADOW_MAP_SIZE });
+    ShadowMapGPInfo.DepthStencilState.depthTestEnable = VK_TRUE;
+    ShadowMapGPInfo.DepthStencilState.depthWriteEnable = VK_TRUE;
+    ShadowMapGPInfo.DepthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    State->GraphicsPipelines.ShadowMap = vtk::create_graphics_pipeline(Device->Logical, &State->RenderPasses.ShadowMap, 0, &ShadowMapGPInfo);
+}
+
+static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, assets *Assets) {
+    vtk::device *Device = &VulkanInstance->Device;
+    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+    VkFormat DepthImageFormat = vtk::find_depth_image_format(Device->Physical);
+
+    ////////////////////////////////////////////////////////////
+    /// Vertex Layout
+    ////////////////////////////////////////////////////////////
+    State->VertexAttributeIndexes.Position = vtk::push_vertex_attribute(&State->VertexLayout, 3);
+    State->VertexAttributeIndexes.Normal = vtk::push_vertex_attribute(&State->VertexLayout, 3);
+    State->VertexAttributeIndexes.UV = vtk::push_vertex_attribute(&State->VertexLayout, 2);
+
+    ////////////////////////////////////////////////////////////
+    /// Buffers
+    ////////////////////////////////////////////////////////////
+    static const u32 UNIFORM_BUFFER_ARRAY_PADDING = 8;
+    State->UniformBuffers.EntityMatrixes = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device,
+                                                                      scene::MAX_ENTITIES, sizeof(matrix_ubo), Swapchain->Images.Count);
+    State->UniformBuffers.LightMatrixes = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device,
+                                                                     scene::MAX_LIGHTS, sizeof(matrix_ubo), Swapchain->Images.Count);
+    State->UniformBuffers.Lights = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device,
+                                                              1, sizeof(State->Scene.Lights) + UNIFORM_BUFFER_ARRAY_PADDING, Swapchain->Images.Count);
+    State->UniformBuffers.Materials = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device,
+                                                                 state::MAX_MATERIALS, sizeof(material), Swapchain->Images.Count);
+
+    ////////////////////////////////////////////////////////////
+    /// Attachment Images
+    ////////////////////////////////////////////////////////////
+    vtk::image_info DepthImageInfo = {};
+    DepthImageInfo.Width = Swapchain->Extent.width;
+    DepthImageInfo.Height = Swapchain->Extent.height;
+    DepthImageInfo.Format = DepthImageFormat;
+    DepthImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
+    DepthImageInfo.UsageFlags = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    DepthImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    DepthImageInfo.AspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    State->AttachmentImages.Depth = vtk::create_image(Device, &DepthImageInfo);
+
+    vtk::image_info ColorImageInfo = {};
+    ColorImageInfo.Width = Swapchain->Extent.width;
+    ColorImageInfo.Height = Swapchain->Extent.height;
+    ColorImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
+    ColorImageInfo.UsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    ColorImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    ColorImageInfo.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    ColorImageInfo.Format = VK_FORMAT_R8G8B8A8_UNORM;
+    State->AttachmentImages.Albedo = vtk::create_image(Device, &ColorImageInfo);
+    ColorImageInfo.Format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    State->AttachmentImages.Position = vtk::create_image(Device, &ColorImageInfo);
+    State->AttachmentImages.Normal = vtk::create_image(Device, &ColorImageInfo);
+
+    vtk::image_info MaterialIndexImageInfo = {};
+    MaterialIndexImageInfo.Width = Swapchain->Extent.width;
+    MaterialIndexImageInfo.Height = Swapchain->Extent.height;
+    MaterialIndexImageInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
+    MaterialIndexImageInfo.UsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    MaterialIndexImageInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    MaterialIndexImageInfo.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    MaterialIndexImageInfo.Format = VK_FORMAT_R32_UINT;
+    State->AttachmentImages.MaterialIndex = vtk::create_image(Device, &MaterialIndexImageInfo);
+
+    ////////////////////////////////////////////////////////////
+    /// Shadow Maps
+    ////////////////////////////////////////////////////////////
+    vtk::image_info ShadowMapInfo = {};
+    ShadowMapInfo.Width = state::SHADOW_MAP_SIZE;
+    ShadowMapInfo.Height = state::SHADOW_MAP_SIZE;
+    ShadowMapInfo.Format = DepthImageFormat;
+    ShadowMapInfo.Tiling = VK_IMAGE_TILING_OPTIMAL;
+    ShadowMapInfo.UsageFlags = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    ShadowMapInfo.MemoryPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    ShadowMapInfo.AspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    State->ShadowMaps[0].Image = vtk::create_image(Device, &ShadowMapInfo);
+    State->ShadowMaps[0].Sampler = vtk::create_sampler(Device->Logical, VK_FILTER_NEAREST);
+
+    ////////////////////////////////////////////////////////////
+    /// Sync
+    ////////////////////////////////////////////////////////////
+    State->Semaphores.ShadowMapFinished = vtk::create_semaphore(Device->Logical);
+    State->Fences.ShadowMapFinished = vtk::create_fence(Device->Logical);
+
+    create_descriptor_sets(State, VulkanInstance, Assets);
+    create_main_render_pass(State, VulkanInstance, Assets);
+    create_shadow_map_render_pass(State, VulkanInstance, Assets);
 }
 
 static void set_attenuation_values(light *Light, u32 AttenuationIndex) {
@@ -822,12 +960,71 @@ static state *create_state(vulkan_instance *VulkanInstance, assets *Assets) {
     return State;
 }
 
-static void record_render_command_buffer(vulkan_instance *VulkanInstance, assets *Assets, state *State, u32 SwapchainImageIndex) {
+static void record_shadow_map_render_pass(vulkan_instance *VulkanInstance, state *State, u32 SwapchainImageIndex) {
     vtk::device *Device = &VulkanInstance->Device;
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
 
     scene *Scene = &State->Scene;
-    vtk::render_pass *RenderPass = &State->RenderPass;
+    vtk::render_pass *RenderPass = &State->RenderPasses.ShadowMap;
+
+    VkCommandBufferBeginInfo CommandBufferBeginInfo = {};
+    CommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    CommandBufferBeginInfo.flags = 0;
+    CommandBufferBeginInfo.pInheritanceInfo = NULL;
+
+    VkCommandBuffer CommandBuffer = RenderPass->CommandBuffers[0];
+    vtk::validate_vk_result(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo),
+                            "vkBeginCommandBuffer", "failed to begin recording command buffer");
+
+    VkRect2D RenderArea = {};
+    RenderArea.offset.x = 0;
+    RenderArea.offset.y = 0;
+    RenderArea.extent = { state::SHADOW_MAP_SIZE, state::SHADOW_MAP_SIZE };
+
+    VkRenderPassBeginInfo RenderPassBeginInfo = {};
+    RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    RenderPassBeginInfo.renderPass = RenderPass->Handle;
+    RenderPassBeginInfo.framebuffer = RenderPass->Framebuffers[0];
+    RenderPassBeginInfo.renderArea = RenderArea;
+    RenderPassBeginInfo.clearValueCount = RenderPass->ClearValues.Count;
+    RenderPassBeginInfo.pClearValues = RenderPass->ClearValues.Data;
+
+    static x = false;
+    if (x) {
+    vtk::image_memory_barrier(CommandBuffer, State->ShadowMaps[0].Image.Handle, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
+                              { VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT },
+                              { VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL },
+                              { VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT });
+    x = true;
+}
+    vkCmdBeginRenderPass(CommandBuffer, &RenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+        vtk::graphics_pipeline *ShadowMapGP = &State->GraphicsPipelines.ShadowMap;
+        vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.EntityMatrixes };
+        for (u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
+            entity *Entity = Scene->Entities.Values + EntityIndex;
+            mesh *Mesh = Entity->Mesh;
+
+            vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ShadowMapGP->Handle);
+            vtk::bind_descriptor_sets(CommandBuffer, ShadowMapGP->Layout, 0, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
+                                      SwapchainImageIndex, EntityIndex);
+            vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &Mesh->VertexRegion.Buffer->Handle, &Mesh->VertexRegion.Offset);
+            vkCmdBindIndexBuffer(CommandBuffer, Mesh->IndexRegion.Buffer->Handle, Mesh->IndexRegion.Offset, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
+        }
+    vkCmdEndRenderPass(CommandBuffer);
+    vtk::image_memory_barrier(CommandBuffer, State->ShadowMaps[0].Image.Handle, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
+                              { VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT },
+                              { VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+                              { VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT });
+    vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
+}
+
+static void record_main_render_pass(vulkan_instance *VulkanInstance, assets *Assets, state *State, u32 SwapchainImageIndex) {
+    vtk::device *Device = &VulkanInstance->Device;
+    vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
+
+    scene *Scene = &State->Scene;
+    vtk::render_pass *RenderPass = &State->RenderPasses.Main;
 
     VkCommandBufferBeginInfo CommandBufferBeginInfo = {};
     CommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -882,6 +1079,7 @@ static void record_render_command_buffer(vulkan_instance *VulkanInstance, assets
             mesh *FullscreenPlane = ctk::at(&Assets->Meshes, "fullscreen_plane");
             VkDescriptorSet DescriptorSets[] = {
                 State->DescriptorSets.InputAttachments.Instances[0],
+                State->DescriptorSets.ShadowMaps.Instances[0],
                 State->DescriptorSets.Lights.Instances[SwapchainImageIndex],
                 State->DescriptorSets.Materials.Instances[SwapchainImageIndex],
             };
@@ -908,21 +1106,21 @@ static void record_render_command_buffer(vulkan_instance *VulkanInstance, assets
         {
             // Draw Light Diamonds
             vtk::graphics_pipeline *UnlitColorGP = &State->GraphicsPipelines.UnlitColor;
-            mesh *LightDiamond = ctk::at(&Assets->Meshes, "light_diamond");
+            mesh *light_mesh = ctk::at(&Assets->Meshes, "direction_pyramid");
             vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.LightMatrixes };
             vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, UnlitColorGP->Handle);
 
             // Point Lights
-            for(u32 LightIndex = 0; LightIndex < Scene->Lights.Count; ++LightIndex) {
+            for (u32 LightIndex = 0; LightIndex < Scene->Lights.Count; ++LightIndex) {
                 vtk::bind_descriptor_sets(CommandBuffer, UnlitColorGP->Layout, 0, DescriptorSets, CTK_ARRAY_COUNT(DescriptorSets),
                                           SwapchainImageIndex, LightIndex);
                 vkCmdPushConstants(CommandBuffer, UnlitColorGP->Layout, VK_SHADER_STAGE_FRAGMENT_BIT,
                                    0, sizeof(ctk::vec3<f32>), &Scene->Lights[LightIndex].Color);
-                vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &LightDiamond->VertexRegion.Buffer->Handle,
-                                       &LightDiamond->VertexRegion.Offset);
-                vkCmdBindIndexBuffer(CommandBuffer, LightDiamond->IndexRegion.Buffer->Handle, LightDiamond->IndexRegion.Offset,
+                vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &light_mesh->VertexRegion.Buffer->Handle,
+                                       &light_mesh->VertexRegion.Offset);
+                vkCmdBindIndexBuffer(CommandBuffer, light_mesh->IndexRegion.Buffer->Handle, light_mesh->IndexRegion.Offset,
                                      VK_INDEX_TYPE_UINT32);
-                vkCmdDrawIndexed(CommandBuffer, LightDiamond->Indexes.Count, 1, 0, 0, 0);
+                vkCmdDrawIndexed(CommandBuffer, light_mesh->Indexes.Count, 1, 0, 0, 0);
             }
         }
     vkCmdEndRenderPass(CommandBuffer);
@@ -978,13 +1176,24 @@ static void update_lights(VkDevice LogicalDevice, state *State, glm::mat4 ViewPr
                               &Scene->Lights, sizeof(Scene->Lights), 0);
 }
 
-static void update_scene(VkDevice LogicalDevice, input_state *InputState, state *State, u32 SwapchainImageIndex) {
-    scene *Scene = &State->Scene;
-    glm::mat4 ViewProjectionMatrix = view_projection_matrix(&Scene->Camera);
-    update_entity_matrixes(LogicalDevice, Scene, ViewProjectionMatrix, State->UniformBuffers.EntityMatrixes.Regions + SwapchainImageIndex);
-    update_lights(LogicalDevice, State, ViewProjectionMatrix, SwapchainImageIndex);
-    vtk::write_to_host_region(LogicalDevice, State->UniformBuffers.Materials.Regions + SwapchainImageIndex,
-                              State->Materials.Values, ctk::values_byte_count(&State->Materials), 0);
+static glm::mat4 light_view_projection_matrix(struct transform *t) {
+    // View Matrix
+    glm::vec3 light_pos = { t->Position.X, t->Position.Y, t->Position.Z };
+    glm::mat4 light_trans_matrix(1.0f);
+    light_trans_matrix = glm::rotate(light_trans_matrix, glm::radians(t->Rotation.X), { 1.0f, 0.0f, 0.0f });
+    light_trans_matrix = glm::rotate(light_trans_matrix, glm::radians(t->Rotation.Y), { 0.0f, 1.0f, 0.0f });
+    light_trans_matrix = glm::rotate(light_trans_matrix, glm::radians(t->Rotation.Z), { 0.0f, 0.0f, 1.0f });
+    light_trans_matrix = glm::translate(light_trans_matrix, light_pos);
+    glm::vec3 light_forward = { light_trans_matrix[0][2], light_trans_matrix[1][2], light_trans_matrix[2][2] };
+    glm::mat4 view = glm::lookAt(light_pos, light_pos + light_forward, { 0.0f, -1.0f, 0.0f });
+
+    // Projection Matrix
+    glm::mat4 proj = glm::ortho(-10.0f, 10.0f, // left/right
+                                -10.0f, 10.0f, // bottom/top
+                                1.0f, 7.5f); // near/far
+    proj[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
+
+    return proj * view;
 }
 
 ////////////////////////////////////////////////////////////
@@ -1089,7 +1298,6 @@ static void draw_ui(ui *UI, state *State, window *win) {
             separator();
             ImGui::Text("color");
             ImGui::ColorPicker4("##color", &Light->Color.X);
-
         } else if (ControlState->Mode == control_state::MODE_MATERIAL) {
             struct material *material = State->Materials.Values + ControlState->MaterialIndex;
             ImGui::SliderInt("shine exponent", (s32 *)&material->ShineExponent, 4, 1024);
@@ -1154,28 +1362,135 @@ static void test_main() {
     ImGuiStyle &style = ImGui::GetStyle();
     style.WindowRounding = 0.0f;
 
+    // Main Loop
+    vtk::device *Device = &app.VulkanInstance->Device;
+    vtk::swapchain *Swapchain = &app.VulkanInstance->Swapchain;
     while (!glfwWindowShouldClose(app.Window->Handle)) {
-        // Check if window should close.
+        ////////////////////////////////////////////////////////////
+        /// Input
+        ////////////////////////////////////////////////////////////
         glfwPollEvents();
-        if (app.InputState->KeyDown[GLFW_KEY_ESCAPE]) break;
+        if (app.InputState->KeyDown[GLFW_KEY_ESCAPE])
+            break;
 
-        // Process input.
         if (!app.UI->IO->WantCaptureKeyboard) {
             update_input_state(app.InputState, app.Window->Handle);
             controls(app.State, app.InputState);
         }
 
-        // Process frame.
+        ////////////////////////////////////////////////////////////
+        /// Frame
+        ////////////////////////////////////////////////////////////
         u32 SwapchainImageIndex = aquire_next_swapchain_image_index(app.VulkanInstance);
-        record_render_command_buffer(app.VulkanInstance, app.Assets, app.State, SwapchainImageIndex);
-        ui_new_frame();
-        draw_ui(app.UI, app.State, app.Window);
-        record_ui_command_buffer(app.VulkanInstance, app.UI, SwapchainImageIndex);
-        update_scene(app.VulkanInstance->Device.Logical, app.InputState, app.State, SwapchainImageIndex);
         synchronize_current_frame(app.VulkanInstance, SwapchainImageIndex);
-        vtk::render_pass *RenderPasses[] = { &app.State->RenderPass, &app.UI->RenderPass };
-        submit_render_passes(app.VulkanInstance, RenderPasses, CTK_ARRAY_COUNT(RenderPasses), SwapchainImageIndex);
+
+        ////////////////////////////////////////////////////////////
+        /// Render Pass Command Buffer Recording
+        ////////////////////////////////////////////////////////////
+
+        // Shadow Map Rendering
+        {
+            glm::mat4 ViewProjectionMatrix(1.0f);
+            update_entity_matrixes(Device->Logical, &app.State->Scene, ViewProjectionMatrix, app.State->UniformBuffers.EntityMatrixes.Regions + SwapchainImageIndex);
+
+            // Ensure command buffer is finished rendering before recording new commands.
+            vkWaitForFences(Device->Logical, 1, &app.State->Fences.ShadowMapFinished, VK_TRUE, UINT64_MAX);
+            vkResetFences(Device->Logical, 1, &app.State->Fences.ShadowMapFinished);
+            record_shadow_map_render_pass(app.VulkanInstance, app.State, SwapchainImageIndex);
+        }
+
+        // Scene Rendering
+        {
+            glm::mat4 ViewProjectionMatrix = camera_view_projection_matrix(&app.State->Scene.Camera);
+            update_entity_matrixes(Device->Logical, &app.State->Scene, ViewProjectionMatrix, app.State->UniformBuffers.EntityMatrixes.Regions + SwapchainImageIndex);
+            update_lights(Device->Logical, app.State, ViewProjectionMatrix, SwapchainImageIndex);
+            vtk::write_to_host_region(Device->Logical, app.State->UniformBuffers.Materials.Regions + SwapchainImageIndex,
+                                      app.State->Materials.Values, ctk::values_byte_count(&app.State->Materials), 0);
+            record_main_render_pass(app.VulkanInstance, app.Assets, app.State, SwapchainImageIndex);
+        }
+
+        // UI Rendering
+        {
+            ui_new_frame();
+            draw_ui(app.UI, app.State, app.Window);
+            record_ui_render_pass(app.VulkanInstance, app.UI, SwapchainImageIndex);
+        }
+
+        ////////////////////////////////////////////////////////////
+        /// Command Buffers Submission
+        ////////////////////////////////////////////////////////////
+        vtk::frame_state *FrameState = &app.VulkanInstance->FrameState;
+        vtk::frame *CurrentFrame = FrameState->Frames + FrameState->CurrentFrameIndex;
+
+        // Shadow Map Command Buffer
+        {
+            VkSubmitInfo submit_info = {};
+            submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submit_info.waitSemaphoreCount = 0;
+            submit_info.pWaitSemaphores = NULL;
+            submit_info.pWaitDstStageMask = NULL;
+            submit_info.commandBufferCount = 1;
+            submit_info.pCommandBuffers = app.State->RenderPasses.ShadowMap.CommandBuffers + 0;
+            submit_info.signalSemaphoreCount = 1;
+            submit_info.pSignalSemaphores = &app.State->Semaphores.ShadowMapFinished;
+            vtk::validate_vk_result(vkQueueSubmit(Device->GraphicsQueue, 1, &submit_info, app.State->Fences.ShadowMapFinished),
+                                    "vkQueueSubmit", "failed to submit command buffer to graphics queue");
+        }
+
+        // Render Command Buffers
+        {
+            VkCommandBuffer cmd_bufs[] = {
+                app.State->RenderPasses.Main.CommandBuffers[SwapchainImageIndex],
+                app.UI->RenderPass.CommandBuffers[SwapchainImageIndex],
+            };
+
+            // 1:1 semaphores:wait_stages
+            VkSemaphore wait_semaphores[] = {
+                app.State->Semaphores.ShadowMapFinished,
+                CurrentFrame->ImageAquiredSemaphore,
+            };
+            VkPipelineStageFlags wait_stages[] = {
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            };
+
+            VkSubmitInfo submit_info = {};
+            submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submit_info.waitSemaphoreCount = CTK_ARRAY_COUNT(wait_semaphores);
+            submit_info.pWaitSemaphores = wait_semaphores;
+            submit_info.pWaitDstStageMask = wait_stages;
+            submit_info.commandBufferCount = CTK_ARRAY_COUNT(cmd_bufs);
+            submit_info.pCommandBuffers = cmd_bufs;
+            submit_info.signalSemaphoreCount = 1;
+            submit_info.pSignalSemaphores = &CurrentFrame->RenderFinishedSemaphore;
+            vtk::validate_vk_result(vkQueueSubmit(Device->GraphicsQueue, 1, &submit_info, CurrentFrame->InFlightFence),
+                                    "vkQueueSubmit", "failed to submit command buffer to graphics queue");
+        }
+
+        ////////////////////////////////////////////////////////////
+        /// Presentation
+        ////////////////////////////////////////////////////////////
+
+        // Provide 1:1 index per swapchain.
+        VkSwapchainKHR Swapchains[] = { Swapchain->Handle };
+        u32 SwapchainImageIndexes[] = { SwapchainImageIndex };
+        VkSemaphore PresentWaitSemaphores[] = { CurrentFrame->RenderFinishedSemaphore };
+
+        VkPresentInfoKHR PresentInfo = {};
+        PresentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        PresentInfo.waitSemaphoreCount = CTK_ARRAY_COUNT(PresentWaitSemaphores);
+        PresentInfo.pWaitSemaphores = PresentWaitSemaphores;
+        PresentInfo.swapchainCount = CTK_ARRAY_COUNT(Swapchains);
+        PresentInfo.pSwapchains = Swapchains;
+        PresentInfo.pImageIndices = SwapchainImageIndexes;
+        PresentInfo.pResults = NULL;
+
+        // Submit Swapchains to present queue for presentation once rendering is complete.
+        vtk::validate_vk_result(vkQueuePresentKHR(Device->PresentQueue, &PresentInfo), "vkQueuePresentKHR",
+                                "failed to queue image for presentation");
+
         cycle_frame(app.VulkanInstance);
+
         Sleep(1);
     }
 }
