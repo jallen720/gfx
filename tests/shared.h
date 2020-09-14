@@ -442,6 +442,21 @@ static u32 aquire_next_swapchain_image_index(vulkan_instance* VulkanInstance) {
     return SwapchainImageIndex;
 }
 
+static void synchronize_current_frame(vulkan_instance* VulkanInstance, u32 SwapchainImageIndex) {
+    vtk::device* Device = &VulkanInstance->Device;
+    vtk::frame_state* FrameState = &VulkanInstance->FrameState;
+
+    vtk::frame* CurrentFrame = FrameState->Frames + FrameState->CurrentFrameIndex;
+
+    // Wait on swapchain image's previously associated frame fence before rendering.
+    VkFence* PreviousFrameInFlightFence = FrameState->PreviousFrameInFlightFences + SwapchainImageIndex;
+    if(*PreviousFrameInFlightFence != VK_NULL_HANDLE) {
+        vkWaitForFences(Device->Logical, 1, PreviousFrameInFlightFence, VK_TRUE, UINT64_MAX);
+    }
+    vkResetFences(Device->Logical, 1, &CurrentFrame->InFlightFence);
+    *PreviousFrameInFlightFence = CurrentFrame->InFlightFence;
+}
+
 static glm::mat4 camera_view_projection_matrix(camera* Camera) {
     transform* CameraTransform = &Camera->Transform;
 
@@ -460,21 +475,6 @@ static glm::mat4 camera_view_projection_matrix(camera* Camera) {
     ProjectionMatrix[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
 
     return ProjectionMatrix * ViewMatrix;
-}
-
-static void synchronize_current_frame(vulkan_instance* VulkanInstance, u32 SwapchainImageIndex) {
-    vtk::device* Device = &VulkanInstance->Device;
-    vtk::frame_state* FrameState = &VulkanInstance->FrameState;
-
-    vtk::frame* CurrentFrame = FrameState->Frames + FrameState->CurrentFrameIndex;
-
-    // Wait on swapchain image's previously associated frame fence before rendering.
-    VkFence* PreviousFrameInFlightFence = FrameState->PreviousFrameInFlightFences + SwapchainImageIndex;
-    if(*PreviousFrameInFlightFence != VK_NULL_HANDLE) {
-        vkWaitForFences(Device->Logical, 1, PreviousFrameInFlightFence, VK_TRUE, UINT64_MAX);
-    }
-    vkResetFences(Device->Logical, 1, &CurrentFrame->InFlightFence);
-    *PreviousFrameInFlightFence = CurrentFrame->InFlightFence;
 }
 
 static void submit_render_pass_command_buffers(vulkan_instance* VulkanInstance, VkCommandBuffer *CommandBuffers, u32 CommandBufferCount, u32 SwapchainImageIndex) {

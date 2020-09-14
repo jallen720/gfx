@@ -391,9 +391,13 @@ struct app {
         struct vtk_graphics_pipeline main;
     } graphics_pipelines;
     struct {
-        VkSemaphore swapchain_img_aquired;
-        VkSemaphore render_finished;
-    } semaphores;
+        struct ctk_array<VkSemaphore, 4> img_aquired;
+        struct ctk_array<u32, 4> img_prev_frame;
+        struct ctk_array<VkSemaphore, 4> render_finished;
+        struct ctk_array<VkFence, 4> in_flight;
+        u32 curr_frame;
+        u32 frame_count;
+    } frame_sync;
 };
 
 static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
@@ -531,6 +535,33 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk, struc
     }
 }
 
+static void init_frame_sync(struct app *app, struct vk_core *vk) {
+    app->frame_sync.frame_count = vk->swapchain.image_count;
+    CTK_ASSERT(app->frame_sync.frame_count <= app->frame_sync.img_aquired.size)
+    app->frame_sync.img_aquired.count = app->frame_sync.frame_count;
+    app->frame_sync.img_prev_frame.count = vk->swapchain.image_count;
+    app->frame_sync.render_finished.count = app->frame_sync.frame_count;
+    app->frame_sync.in_flight.count = app->frame_sync.frame_count;
+
+    // Frame Sync Objects
+    VkSemaphoreCreateInfo semaphore_ci = {};
+    semaphore_ci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    semaphore_ci.flags = 0;
+
+    VkFenceCreateInfo fence_ci = {};
+    fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    for (u32 i = 0; i < app->frame_sync.frame_count; ++i) {
+        vtk_validate_result(vkCreateSemaphore(vk->device.logical, &semaphore_ci, NULL, app->frame_sync.img_aquired + i), "failed to create semaphore");
+        vtk_validate_result(vkCreateSemaphore(vk->device.logical, &semaphore_ci, NULL, app->frame_sync.render_finished + i), "failed to create semaphore");
+        vtk_validate_result(vkCreateFence(vk->device.logical, &fence_ci, NULL, app->frame_sync.in_flight + i), "failed to create fence");
+    }
+
+    for (u32 i = 0; i < vk->swapchain.image_count; ++i)
+        app->frame_sync.img_prev_frame[i] = CTK_U32_MAX;
+}
+
 static void init_app(struct app *app, struct vk_core *vk, struct assets *assets) {
     // Vertex Layout
     vtk_push_vertex_attribute(&app->vertex_layout, "position", 3);
@@ -538,8 +569,7 @@ static void init_app(struct app *app, struct vk_core *vk, struct assets *assets)
     vtk_push_vertex_attribute(&app->vertex_layout, "uv", 2);
 
     // Uniform Buffers
-    app->uniform_buffers.entity_model_mtxs = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, 1, sizeof(struct model_mtxs),
-                                                                       vk->swapchain.image_count);
+    app->uniform_buffers.entity_model_mtxs = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, 1, sizeof(struct model_mtxs), vk->swapchain.image_count);
 
     // Attachment Images
     struct vtk_image_info depth_image_info = {};
@@ -555,23 +585,7 @@ static void init_app(struct app *app, struct vk_core *vk, struct assets *assets)
     create_descriptor_sets(app, vk);
     create_render_passes(app, vk);
     create_graphics_pipelines(app, vk, assets);
-
-    // Semaphores
-    VkSemaphoreCreateInfo semaphore_ci = {};
-    semaphore_ci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    semaphore_ci.flags = 0;
-    vtk_validate_result(vkCreateSemaphore(vk->device.logical, &semaphore_ci, NULL, &app->semaphores.swapchain_img_aquired),
-                        "failed to create semaphore");
-    vtk_validate_result(vkCreateSemaphore(vk->device.logical, &semaphore_ci, NULL, &app->semaphores.render_finished),
-                        "failed to create semaphore");
-
-    // // Fences
-    // VkFenceCreateInfo fence_ci = {};
-    // fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    // fence_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    // VkFence Fence = VK_NULL_HANDLE;
-    // vtk_validate_result(vkCreateFence(vk->device.logical, &fence_ci, NULL, &app->fences.), "vkCreateFence", "failed to create fence");
-
+    init_frame_sync(app, vk);
 }
 
 static void record_render_passes(struct app *app, struct vk_core *vk, struct assets *assets, u32 swapchain_img_idx) {
@@ -605,11 +619,13 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct ass
             struct vtk_descriptor_set *desc_sets[] = { &app->descriptor.sets.entity_model_mtxs };
             struct mesh *mesh = ctk_at(&assets->meshes, "cube");
 
-            vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
-            vtk_bind_descriptor_sets(cmd_buf, gp->layout, desc_sets, CTK_ARRAY_COUNT(desc_sets), 0, swapchain_img_idx, 0);
-            vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
-            vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
+            // CTK_REPEAT(10000) {
+                vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
+                vtk_bind_descriptor_sets(cmd_buf, gp->layout, desc_sets, CTK_ARRAY_COUNT(desc_sets), 0, swapchain_img_idx, 0);
+                vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
+                vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
+            // }
         vkCmdEndRenderPass(cmd_buf);
         vtk_validate_result(vkEndCommandBuffer(cmd_buf), "error during render pass command recording");
     }
@@ -721,13 +737,13 @@ static void submit_command_buffers(struct app *app, struct vk_core *vk, u32 swap
             app->render_passes.main.command_buffers[swapchain_img_idx],
         };
         VkSemaphore wait_semaphores[] = {
-            app->semaphores.swapchain_img_aquired,
+            app->frame_sync.img_aquired[app->frame_sync.curr_frame],
         };
         VkPipelineStageFlags wait_stages[] = {
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
         };
         VkSemaphore signal_semaphores[] = {
-            app->semaphores.render_finished,
+            app->frame_sync.render_finished[app->frame_sync.curr_frame],
         };
 
         VkSubmitInfo submit_info = {};
@@ -739,14 +755,14 @@ static void submit_command_buffers(struct app *app, struct vk_core *vk, u32 swap
         submit_info.pCommandBuffers = cmd_bufs;
         submit_info.signalSemaphoreCount = CTK_ARRAY_COUNT(signal_semaphores);
         submit_info.pSignalSemaphores = signal_semaphores;
-        vtk_validate_result(vkQueueSubmit(vk->device.queues.graphics, 1, &submit_info, VK_NULL_HANDLE),
-                            "failed to submit command buffer to graphics queue");
+        vtk_validate_result(vkQueueSubmit(vk->device.queues.graphics, 1, &submit_info, app->frame_sync.in_flight[app->frame_sync.curr_frame]),
+                            "failed to submit %u command buffer(s) to graphics queue", submit_info.commandBufferCount);
     }
 
     // Present
     {
         VkSemaphore wait_semaphores[] = {
-            app->semaphores.render_finished,
+            app->frame_sync.render_finished[app->frame_sync.curr_frame],
         };
         VkSwapchainKHR swapchains[] = {
             vk->swapchain.handle,
@@ -770,17 +786,24 @@ static void submit_command_buffers(struct app *app, struct vk_core *vk, u32 swap
 ////////////////////////////////////////////////////////////
 /// Synchronization
 ////////////////////////////////////////////////////////////
-static u32 vtk_aquire_swapchain_image_index(struct vk_core *vk, struct app *app) {
-    // // Wait on current frame's fence if still unsignaled.
-    // vkWaitForFences(logical_device, 1, &app->frame.in_flight_fences[app->frame.index], VK_TRUE, UINT64_MAX);
-
-    // Aquire next swapchain image index, using a semaphore to signal when image is available for rendering.
+static u32 vtk_aquire_swapchain_image_index(struct app *app, struct vk_core *vk) {
     u32 swapchain_img_idx = VTK_UNSET_INDEX;
-    vtk_validate_result(vkAcquireNextImageKHR(vk->device.logical, vk->swapchain.handle, UINT64_MAX, app->semaphores.swapchain_img_aquired,
-                                              VK_NULL_HANDLE, &swapchain_img_idx),
+    vtk_validate_result(vkAcquireNextImageKHR(vk->device.logical, vk->swapchain.handle, CTK_U64_MAX, app->frame_sync.img_aquired[app->frame_sync.curr_frame], VK_NULL_HANDLE,
+                                              &swapchain_img_idx),
                         "failed to aquire next swapchain image");
-
     return swapchain_img_idx;
+}
+
+static void sync_frame(struct app *app, struct vk_core *vk, u32 swapchain_img_idx) {
+    u32 *img_prev_frame = app->frame_sync.img_prev_frame + swapchain_img_idx;
+    if (*img_prev_frame != CTK_U32_MAX)
+        vkWaitForFences(vk->device.logical, 1, app->frame_sync.in_flight + *img_prev_frame, VK_TRUE, CTK_U64_MAX);
+    vkResetFences(vk->device.logical, 1, app->frame_sync.in_flight + app->frame_sync.curr_frame);
+    *img_prev_frame = app->frame_sync.curr_frame;
+}
+
+static void cycle_frame(struct app *app) {
+    app->frame_sync.curr_frame = app->frame_sync.curr_frame == app->frame_sync.frame_count - 1 ? 0 : app->frame_sync.curr_frame + 1;
 }
 
 ////////////////////////////////////////////////////////////
@@ -871,12 +894,13 @@ void test_main() {
         camera_controls(&scene.camera.transform, &window);
 
         // Rendering
-        u32 swapchain_img_idx = vtk_aquire_swapchain_image_index(&vk, &app);
+        u32 swapchain_img_idx = vtk_aquire_swapchain_image_index(&app, &vk);
+        sync_frame(&app, &vk, swapchain_img_idx);
         record_render_passes(&app, &vk, &assets, swapchain_img_idx);
         update_scene(&scene, &vk, &app, swapchain_img_idx);
         submit_command_buffers(&app, &vk, swapchain_img_idx);
-        vkDeviceWaitIdle(vk.device.logical);
+        cycle_frame(&app);
 
-        // Sleep(1);
+        Sleep(1);
     }
 }
