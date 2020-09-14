@@ -19,8 +19,8 @@ static const ctk::vec2<f32> ATTENUATION_VALUES[ATTENUATION_VALUE_COUNT] = {
 };
 
 struct matrix_ubo {
-    alignas(16) glm::mat4 ModelMatrix;
-    alignas(16) glm::mat4 ModelViewProjectionMatrix;
+    glm::mat4 ModelMatrix;
+    glm::mat4 ModelViewProjectionMatrix;
 };
 
 struct light {
@@ -30,7 +30,7 @@ struct light {
     f32 Quadratic;
     f32 Intensity;
     f32 AmbientIntensity;
-    char Pad[4];
+    alignas(16) glm::mat4 view_proj_mtx;
 };
 
 struct entity {
@@ -82,7 +82,7 @@ struct control_state {
 
 struct state {
     static const u32 MAX_MATERIALS = 16;
-    static const u32 SHADOW_MAP_SIZE = 1080;
+    static const u32 SHADOW_MAP_SIZE = 10000;
     scene Scene;
     control_state ControlState;
     struct {
@@ -104,6 +104,7 @@ struct state {
     } VertexAttributeIndexes;
     struct {
         vtk::uniform_buffer EntityMatrixes;
+        vtk::uniform_buffer ShadowMapEntityMatrixes;
         vtk::uniform_buffer LightMatrixes;
         vtk::uniform_buffer Lights;
         vtk::uniform_buffer Materials;
@@ -117,7 +118,7 @@ struct state {
     } AttachmentImages;
     vtk::texture ShadowMaps[1];
     struct {
-        VkDescriptorSetLayout EntityMatrixes;
+        VkDescriptorSetLayout entity_matrixes;
         VkDescriptorSetLayout Lights;
         VkDescriptorSetLayout InputAttachments;
         VkDescriptorSetLayout Textures;
@@ -126,6 +127,7 @@ struct state {
     } DescriptorSetLayouts;
     struct {
         vtk::descriptor_set EntityMatrixes;
+        vtk::descriptor_set ShadowMapEntityMatrixes;
         vtk::descriptor_set LightMatrixes;
         vtk::descriptor_set Lights;
         vtk::descriptor_set InputAttachments;
@@ -206,6 +208,7 @@ static void create_descriptor_sets(state *State, vulkan_instance *VulkanInstance
     vtk::swapchain *Swapchain = &VulkanInstance->Swapchain;
 
     vtk::descriptor_set *EntityMatrixesDS = &State->DescriptorSets.EntityMatrixes;
+    vtk::descriptor_set *ShadowMapEntityMatrixesDS = &State->DescriptorSets.ShadowMapEntityMatrixes;
     vtk::descriptor_set *LightMatrixesDS = &State->DescriptorSets.LightMatrixes;
     vtk::descriptor_set *LightsDS = &State->DescriptorSets.Lights;
     vtk::descriptor_set *InputAttachmentsDS = &State->DescriptorSets.InputAttachments;
@@ -231,114 +234,132 @@ static void create_descriptor_sets(state *State, vulkan_instance *VulkanInstance
     /// Layouts
     ////////////////////////////////////////////////////////////
 
-    // EntityMatrixes
-    ctk::sarray<VkDescriptorSetLayoutBinding, 4> EntityMatrixesLayoutBindings = {};
-    ctk::push(&EntityMatrixesLayoutBindings, { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT });
+    /* entity_matrixes */ {
+        VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT };
+        VkDescriptorSetLayoutCreateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        info.bindingCount = 1;
+        info.pBindings = &binding;
+        vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &info, NULL, &State->DescriptorSetLayouts.entity_matrixes),
+                                "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
+    }
 
-    VkDescriptorSetLayoutCreateInfo EntityMatrixesLayoutCreateInfo = {};
-    EntityMatrixesLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    EntityMatrixesLayoutCreateInfo.bindingCount = EntityMatrixesLayoutBindings.Count;
-    EntityMatrixesLayoutCreateInfo.pBindings = EntityMatrixesLayoutBindings.Data;
-    vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &EntityMatrixesLayoutCreateInfo, NULL,
-                                                        &State->DescriptorSetLayouts.EntityMatrixes),
-                            "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
+    /* Lights */ {
+        VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT };
+        VkDescriptorSetLayoutCreateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        info.bindingCount = 1;
+        info.pBindings = &binding;
+        vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &info, NULL, &State->DescriptorSetLayouts.Lights),
+                                "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
+    }
 
+    /* InputAttachments */ {
+        VkDescriptorSetLayoutBinding bindings[] = {
+            { 0, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 2, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 3, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_FRAGMENT_BIT },
+        };
+        VkDescriptorSetLayoutCreateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        info.bindingCount = CTK_ARRAY_COUNT(bindings);
+        info.pBindings = bindings;
+        vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &info, NULL, &State->DescriptorSetLayouts.InputAttachments),
+                                "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
+    }
 
-    // Lights
-    ctk::sarray<VkDescriptorSetLayoutBinding, 4> LightsLayoutBindings = {};
-    ctk::push(&LightsLayoutBindings, { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT });
+    /* Textures */ {
+        VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT };
+        VkDescriptorSetLayoutCreateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        info.bindingCount = 1;
+        info.pBindings = &binding;
+        vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &info, NULL, &State->DescriptorSetLayouts.Textures),
+                                "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
+    }
 
-    VkDescriptorSetLayoutCreateInfo LightsLayoutCreateInfo = {};
-    LightsLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    LightsLayoutCreateInfo.bindingCount = LightsLayoutBindings.Count;
-    LightsLayoutCreateInfo.pBindings = LightsLayoutBindings.Data;
-    vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &LightsLayoutCreateInfo, NULL,
-                                                        &State->DescriptorSetLayouts.Lights),
-                            "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
+    /* Materials */ {
+        VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT };
+        VkDescriptorSetLayoutCreateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        info.bindingCount = 1;
+        info.pBindings = &binding;
+        vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &info, NULL, &State->DescriptorSetLayouts.Materials),
+                                "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
+    }
 
-    // InputAttachments
-    ctk::sarray<VkDescriptorSetLayoutBinding, 4> InputAttachmentsLayoutBindings = {};
-    ctk::push(&InputAttachmentsLayoutBindings, { 0, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_FRAGMENT_BIT });
-    ctk::push(&InputAttachmentsLayoutBindings, { 1, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_FRAGMENT_BIT });
-    ctk::push(&InputAttachmentsLayoutBindings, { 2, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_FRAGMENT_BIT });
-    ctk::push(&InputAttachmentsLayoutBindings, { 3, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_FRAGMENT_BIT });
-
-    VkDescriptorSetLayoutCreateInfo InputAttachmentsLayoutCreateInfo = {};
-    InputAttachmentsLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    InputAttachmentsLayoutCreateInfo.bindingCount = InputAttachmentsLayoutBindings.Count;
-    InputAttachmentsLayoutCreateInfo.pBindings = InputAttachmentsLayoutBindings.Data;
-    vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &InputAttachmentsLayoutCreateInfo, NULL,
-                                                        &State->DescriptorSetLayouts.InputAttachments),
-                            "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
-
-    // Textures
-    ctk::sarray<VkDescriptorSetLayoutBinding, 4> TexturesLayoutBindings = {};
-    ctk::push(&TexturesLayoutBindings, { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT });
-
-    VkDescriptorSetLayoutCreateInfo TexturesLayoutCreateInfo = {};
-    TexturesLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    TexturesLayoutCreateInfo.bindingCount = TexturesLayoutBindings.Count;
-    TexturesLayoutCreateInfo.pBindings = TexturesLayoutBindings.Data;
-    vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &TexturesLayoutCreateInfo, NULL,
-                                                        &State->DescriptorSetLayouts.Textures),
-                            "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
-
-    // Materials
-    ctk::sarray<VkDescriptorSetLayoutBinding, 4> MaterialsLayoutBindings = {};
-    ctk::push(&MaterialsLayoutBindings, { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT });
-
-    VkDescriptorSetLayoutCreateInfo MaterialsLayoutCreateInfo = {};
-    MaterialsLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    MaterialsLayoutCreateInfo.bindingCount = MaterialsLayoutBindings.Count;
-    MaterialsLayoutCreateInfo.pBindings = MaterialsLayoutBindings.Data;
-    vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &MaterialsLayoutCreateInfo, NULL,
-                                                        &State->DescriptorSetLayouts.Materials),
-                            "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
-
-    // Shadow Maps
-    VkDescriptorSetLayoutBinding shadow_maps_binding = { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT };
-    VkDescriptorSetLayoutCreateInfo shadow_maps_layout_ci = {};
-    shadow_maps_layout_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    shadow_maps_layout_ci.bindingCount = 1;
-    shadow_maps_layout_ci.pBindings = &shadow_maps_binding;
-    vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &shadow_maps_layout_ci, NULL, &State->DescriptorSetLayouts.ShadowMaps),
-                            "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
+    /* Shadow Maps */ {
+        VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT };
+        VkDescriptorSetLayoutCreateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        info.bindingCount = 1;
+        info.pBindings = &binding;
+        vtk::validate_vk_result(vkCreateDescriptorSetLayout(Device->Logical, &info, NULL, &State->DescriptorSetLayouts.ShadowMaps),
+                                "vkCreateDescriptorSetLayout", "error creating descriptor set layout");
+    }
 
     ////////////////////////////////////////////////////////////
     /// Allocation
     ////////////////////////////////////////////////////////////
-    ctk::sarray<VkDescriptorSetLayout, 4> EntityMatrixesDuplicateLayouts = {};
-    CTK_ITERATE(Swapchain->Images.Count) ctk::push(&EntityMatrixesDuplicateLayouts, State->DescriptorSetLayouts.EntityMatrixes);
 
-    // EntityMatrixes
-    EntityMatrixesDS->Instances.Count = Swapchain->Images.Count;
-    ctk::push(&EntityMatrixesDS->DynamicOffsets, State->UniformBuffers.EntityMatrixes.ElementSize);
+    /* EntityMatrixes */ {
+        ctk::sarray<VkDescriptorSetLayout, 4> duplicate_layouts = {};
+        CTK_ITERATE(Swapchain->Images.Count)
+            ctk::push(&duplicate_layouts, State->DescriptorSetLayouts.entity_matrixes);
 
-    VkDescriptorSetAllocateInfo EntityMatrixesAllocateInfo = {};
-    EntityMatrixesAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    EntityMatrixesAllocateInfo.descriptorPool = State->DescriptorPool;
-    EntityMatrixesAllocateInfo.descriptorSetCount = EntityMatrixesDuplicateLayouts.Count;
-    EntityMatrixesAllocateInfo.pSetLayouts = EntityMatrixesDuplicateLayouts.Data;
-    vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &EntityMatrixesAllocateInfo, EntityMatrixesDS->Instances.Data),
-                            "vkAllocateDescriptorSets", "failed to allocate descriptor sets");
+        EntityMatrixesDS->Instances.Count = Swapchain->Images.Count;
+        ctk::push(&EntityMatrixesDS->DynamicOffsets, State->UniformBuffers.EntityMatrixes.ElementSize);
 
-    // LightMatrixes
-    LightMatrixesDS->Instances.Count = Swapchain->Images.Count;
-    ctk::push(&LightMatrixesDS->DynamicOffsets, State->UniformBuffers.LightMatrixes.ElementSize);
+        VkDescriptorSetAllocateInfo alloc_info = {};
+        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        alloc_info.descriptorPool = State->DescriptorPool;
+        alloc_info.descriptorSetCount = duplicate_layouts.Count;
+        alloc_info.pSetLayouts = duplicate_layouts.Data;
+        vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &alloc_info, EntityMatrixesDS->Instances.Data),
+                                "vkAllocateDescriptorSets", "failed to allocate descriptor sets");
+    }
 
-    VkDescriptorSetAllocateInfo LightMatrixesAllocateInfo = {};
-    LightMatrixesAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    LightMatrixesAllocateInfo.descriptorPool = State->DescriptorPool;
-    LightMatrixesAllocateInfo.descriptorSetCount = EntityMatrixesDuplicateLayouts.Count;
-    LightMatrixesAllocateInfo.pSetLayouts = EntityMatrixesDuplicateLayouts.Data;
-    vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &LightMatrixesAllocateInfo, LightMatrixesDS->Instances.Data),
-                            "vkAllocateDescriptorSets", "failed to allocate descriptor sets");
+    /* ShadowMapEntityMatrixes */ {
+        ctk::sarray<VkDescriptorSetLayout, 4> duplicate_layouts = {};
+        CTK_ITERATE(Swapchain->Images.Count)
+            ctk::push(&duplicate_layouts,State->DescriptorSetLayouts.entity_matrixes);
+
+        ShadowMapEntityMatrixesDS->Instances.Count = Swapchain->Images.Count;
+        ctk::push(&ShadowMapEntityMatrixesDS->DynamicOffsets, State->UniformBuffers.ShadowMapEntityMatrixes.ElementSize);
+
+        VkDescriptorSetAllocateInfo alloc_info = {};
+        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        alloc_info.descriptorPool = State->DescriptorPool;
+        alloc_info.descriptorSetCount = duplicate_layouts.Count;
+        alloc_info.pSetLayouts = duplicate_layouts.Data;
+        vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &alloc_info, ShadowMapEntityMatrixesDS->Instances.Data),
+                                "vkAllocateDescriptorSets", "failed to allocate descriptor sets");
+    }
+
+    /* LightMatrixes */ {
+        ctk::sarray<VkDescriptorSetLayout, 4> duplicate_layouts = {};
+        CTK_ITERATE(Swapchain->Images.Count)
+            ctk::push(&duplicate_layouts, State->DescriptorSetLayouts.entity_matrixes);
+
+        LightMatrixesDS->Instances.Count = Swapchain->Images.Count;
+        ctk::push(&LightMatrixesDS->DynamicOffsets, State->UniformBuffers.LightMatrixes.ElementSize);
+
+        VkDescriptorSetAllocateInfo alloc_info = {};
+        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        alloc_info.descriptorPool = State->DescriptorPool;
+        alloc_info.descriptorSetCount = duplicate_layouts.Count;
+        alloc_info.pSetLayouts = duplicate_layouts.Data;
+        vtk::validate_vk_result(vkAllocateDescriptorSets(Device->Logical, &alloc_info, LightMatrixesDS->Instances.Data),
+                                "vkAllocateDescriptorSets", "failed to allocate descriptor sets");
+    }
 
     // Lights
     LightsDS->Instances.Count = Swapchain->Images.Count;
 
     ctk::sarray<VkDescriptorSetLayout, 4> LightsDuplicateLayouts = {};
-    CTK_ITERATE(Swapchain->Images.Count) ctk::push(&LightsDuplicateLayouts, State->DescriptorSetLayouts.Lights);
+    CTK_ITERATE(Swapchain->Images.Count)
+        ctk::push(&LightsDuplicateLayouts, State->DescriptorSetLayouts.Lights);
 
     VkDescriptorSetAllocateInfo LightsAllocateInfo = {};
     LightsAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -376,7 +397,8 @@ static void create_descriptor_sets(state *State, vulkan_instance *VulkanInstance
     MaterialsDS->Instances.Count = Swapchain->Images.Count;
 
     ctk::sarray<VkDescriptorSetLayout, 4> MaterialsDuplicateLayouts = {};
-    CTK_ITERATE(Swapchain->Images.Count) ctk::push(&MaterialsDuplicateLayouts, State->DescriptorSetLayouts.Materials);
+    CTK_ITERATE(Swapchain->Images.Count)
+        ctk::push(&MaterialsDuplicateLayouts, State->DescriptorSetLayouts.Materials);
 
     VkDescriptorSetAllocateInfo MaterialsAllocateInfo = {};
     MaterialsAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -420,6 +442,25 @@ static void create_descriptor_sets(state *State, vulkan_instance *VulkanInstance
         EntityMatrixesWrite->descriptorCount = 1;
         EntityMatrixesWrite->descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
         EntityMatrixesWrite->pBufferInfo = EntityMatrixDescriptorBufferInfo;
+    }
+
+    // ShadowMapEntityMatrixes
+    CTK_ITERATE(ShadowMapEntityMatrixesDS->Instances.Count) {
+        vtk::region *ShadowMapEntityMatrixesRegion = State->UniformBuffers.ShadowMapEntityMatrixes.Regions + IterationIndex;
+
+        VkDescriptorBufferInfo *EntityMatrixDescriptorBufferInfo = ctk::push(&DescriptorBufferInfos);
+        EntityMatrixDescriptorBufferInfo->buffer = ShadowMapEntityMatrixesRegion->Buffer->Handle;
+        EntityMatrixDescriptorBufferInfo->offset = ShadowMapEntityMatrixesRegion->Offset;
+        EntityMatrixDescriptorBufferInfo->range = ShadowMapEntityMatrixesRegion->Size;
+
+        VkWriteDescriptorSet *ShadowMapEntityMatrixesWrite = ctk::push(&WriteDescriptorSets);
+        ShadowMapEntityMatrixesWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        ShadowMapEntityMatrixesWrite->dstSet = ShadowMapEntityMatrixesDS->Instances[IterationIndex];
+        ShadowMapEntityMatrixesWrite->dstBinding = 0;
+        ShadowMapEntityMatrixesWrite->dstArrayElement = 0;
+        ShadowMapEntityMatrixesWrite->descriptorCount = 1;
+        ShadowMapEntityMatrixesWrite->descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        ShadowMapEntityMatrixesWrite->pBufferInfo = EntityMatrixDescriptorBufferInfo;
     }
 
     // LightMatrixes
@@ -560,7 +601,7 @@ static void create_descriptor_sets(state *State, vulkan_instance *VulkanInstance
     VkDescriptorImageInfo *shadow_map_img_info = ctk::push(&DescriptorImageInfos);
     shadow_map_img_info->sampler = State->ShadowMaps[0].Sampler;
     shadow_map_img_info->imageView = State->ShadowMaps[0].Image.View;
-    shadow_map_img_info->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    shadow_map_img_info->imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
     VkWriteDescriptorSet *shadow_maps_write = ctk::push(&WriteDescriptorSets);
     shadow_maps_write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -712,7 +753,7 @@ static void create_main_render_pass(state *State, vulkan_instance *VulkanInstanc
     vtk::graphics_pipeline_info DeferredGPInfo = vtk::default_graphics_pipeline_info();
     ctk::push(&DeferredGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "lighting_deferred_vert"));
     ctk::push(&DeferredGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "lighting_deferred_frag"));
-    ctk::push(&DeferredGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.EntityMatrixes);
+    ctk::push(&DeferredGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.entity_matrixes);
     ctk::push(&DeferredGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.Textures);
     ctk::push(&DeferredGPInfo.PushConstantRanges, { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(u32) });
     ctk::push(&DeferredGPInfo.VertexInputs, { 0, 0, State->VertexAttributeIndexes.Position });
@@ -739,6 +780,7 @@ static void create_main_render_pass(state *State, vulkan_instance *VulkanInstanc
     ctk::push(&LightingGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.Materials);
     ctk::push(&LightingGPInfo.PushConstantRanges, { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(lighting_push_constants) });
     ctk::push(&LightingGPInfo.VertexInputs, { 0, 0, State->VertexAttributeIndexes.Position });
+    ctk::push(&LightingGPInfo.VertexInputs, { 0, 1, State->VertexAttributeIndexes.UV });
     LightingGPInfo.VertexLayout = &State->VertexLayout;
     ctk::push(&LightingGPInfo.Viewports, { 0, 0, (f32)Swapchain->Extent.width, (f32)Swapchain->Extent.height, 0, 1 });
     ctk::push(&LightingGPInfo.Scissors, { 0, 0, Swapchain->Extent.width, Swapchain->Extent.height });
@@ -748,7 +790,7 @@ static void create_main_render_pass(state *State, vulkan_instance *VulkanInstanc
     vtk::graphics_pipeline_info UnlitColorGPInfo = vtk::default_graphics_pipeline_info();
     ctk::push(&UnlitColorGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "unlit_color_vert"));
     ctk::push(&UnlitColorGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "unlit_color_frag"));
-    ctk::push(&UnlitColorGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.EntityMatrixes);
+    ctk::push(&UnlitColorGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.entity_matrixes);
     ctk::push(&UnlitColorGPInfo.PushConstantRanges, { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(ctk::vec4<f32>) });
     ctk::push(&UnlitColorGPInfo.VertexInputs, { 0, 0, State->VertexAttributeIndexes.Position });
     UnlitColorGPInfo.VertexLayout = &State->VertexLayout;
@@ -775,7 +817,7 @@ static void create_shadow_map_render_pass(state *State, vulkan_instance *VulkanI
     DepthAttachment->Description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     DepthAttachment->Description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     DepthAttachment->Description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    DepthAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    DepthAttachment->Description.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
     DepthAttachment->ClearValue = { 1.0f, 0 };
 
     // Subpasses
@@ -783,14 +825,22 @@ static void create_shadow_map_render_pass(state *State, vulkan_instance *VulkanI
     ctk::set(&Subpass->DepthAttachmentReference, { 0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
 
     // Subpass Dependencies
-    RenderPassInfo.SubpassDependencies.Count = 1;
+    RenderPassInfo.SubpassDependencies.Count = 2;
     RenderPassInfo.SubpassDependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
     RenderPassInfo.SubpassDependencies[0].dstSubpass = 0;
-    RenderPassInfo.SubpassDependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    RenderPassInfo.SubpassDependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    RenderPassInfo.SubpassDependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-    RenderPassInfo.SubpassDependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    RenderPassInfo.SubpassDependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    RenderPassInfo.SubpassDependencies[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    RenderPassInfo.SubpassDependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    RenderPassInfo.SubpassDependencies[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     RenderPassInfo.SubpassDependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    RenderPassInfo.SubpassDependencies[1].srcSubpass = 0;
+    RenderPassInfo.SubpassDependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    RenderPassInfo.SubpassDependencies[1].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    RenderPassInfo.SubpassDependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    RenderPassInfo.SubpassDependencies[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    RenderPassInfo.SubpassDependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    RenderPassInfo.SubpassDependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
     // Framebuffer Infos
     vtk::framebuffer_info *FramebufferInfo = ctk::push(&RenderPassInfo.FramebufferInfos);
@@ -804,7 +854,7 @@ static void create_shadow_map_render_pass(state *State, vulkan_instance *VulkanI
     vtk::graphics_pipeline_info ShadowMapGPInfo = vtk::default_graphics_pipeline_info();
     ctk::push(&ShadowMapGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "shadow_map_vert"));
     ctk::push(&ShadowMapGPInfo.ShaderModules, ctk::at(&Assets->ShaderModules, "shadow_map_frag"));
-    ctk::push(&ShadowMapGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.EntityMatrixes);
+    ctk::push(&ShadowMapGPInfo.DescriptorSetLayouts, State->DescriptorSetLayouts.entity_matrixes);
     ctk::push(&ShadowMapGPInfo.VertexInputs, { 0, 0, State->VertexAttributeIndexes.Position });
     ShadowMapGPInfo.VertexLayout = &State->VertexLayout;
     ctk::push(&ShadowMapGPInfo.Viewports, { 0, 0, (f32)state::SHADOW_MAP_SIZE, (f32)state::SHADOW_MAP_SIZE, 0, 1 });
@@ -828,17 +878,19 @@ static void create_vulkan_state(state *State, vulkan_instance *VulkanInstance, a
     State->VertexAttributeIndexes.UV = vtk::push_vertex_attribute(&State->VertexLayout, 2);
 
     ////////////////////////////////////////////////////////////
-    /// Buffers
+    /// Uniform Buffers
     ////////////////////////////////////////////////////////////
     static const u32 UNIFORM_BUFFER_ARRAY_PADDING = 8;
-    State->UniformBuffers.EntityMatrixes = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device,
-                                                                      scene::MAX_ENTITIES, sizeof(matrix_ubo), Swapchain->Images.Count);
-    State->UniformBuffers.LightMatrixes = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device,
-                                                                     scene::MAX_LIGHTS, sizeof(matrix_ubo), Swapchain->Images.Count);
-    State->UniformBuffers.Lights = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device,
-                                                              1, sizeof(State->Scene.Lights) + UNIFORM_BUFFER_ARRAY_PADDING, Swapchain->Images.Count);
-    State->UniformBuffers.Materials = vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device,
-                                                                 state::MAX_MATERIALS, sizeof(material), Swapchain->Images.Count);
+    State->UniformBuffers.EntityMatrixes =
+        vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device, scene::MAX_ENTITIES, sizeof(matrix_ubo), Swapchain->Images.Count);
+    State->UniformBuffers.ShadowMapEntityMatrixes =
+        vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device, scene::MAX_ENTITIES, sizeof(matrix_ubo), Swapchain->Images.Count);
+    State->UniformBuffers.LightMatrixes =
+        vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device, scene::MAX_LIGHTS, sizeof(matrix_ubo), Swapchain->Images.Count);
+    State->UniformBuffers.Lights =
+        vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device, 1, sizeof(State->Scene.Lights) + UNIFORM_BUFFER_ARRAY_PADDING, Swapchain->Images.Count);
+    State->UniformBuffers.Materials =
+        vtk::create_uniform_buffer(&VulkanInstance->HostBuffer, &VulkanInstance->Device, state::MAX_MATERIALS, sizeof(material), Swapchain->Images.Count);
 
     ////////////////////////////////////////////////////////////
     /// Attachment Images
@@ -989,17 +1041,9 @@ static void record_shadow_map_render_pass(vulkan_instance *VulkanInstance, state
     RenderPassBeginInfo.clearValueCount = RenderPass->ClearValues.Count;
     RenderPassBeginInfo.pClearValues = RenderPass->ClearValues.Data;
 
-    static x = false;
-    if (x) {
-    vtk::image_memory_barrier(CommandBuffer, State->ShadowMaps[0].Image.Handle, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
-                              { VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT },
-                              { VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL },
-                              { VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT });
-    x = true;
-}
     vkCmdBeginRenderPass(CommandBuffer, &RenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
         vtk::graphics_pipeline *ShadowMapGP = &State->GraphicsPipelines.ShadowMap;
-        vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.EntityMatrixes };
+        vtk::descriptor_set *DescriptorSets[] = { &State->DescriptorSets.ShadowMapEntityMatrixes };
         for (u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
             entity *Entity = Scene->Entities.Values + EntityIndex;
             mesh *Mesh = Entity->Mesh;
@@ -1012,10 +1056,6 @@ static void record_shadow_map_render_pass(vulkan_instance *VulkanInstance, state
             vkCmdDrawIndexed(CommandBuffer, Mesh->Indexes.Count, 1, 0, 0, 0);
         }
     vkCmdEndRenderPass(CommandBuffer);
-    vtk::image_memory_barrier(CommandBuffer, State->ShadowMaps[0].Image.Handle, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
-                              { VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT },
-                              { VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
-                              { VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT });
     vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
 }
 
@@ -1127,8 +1167,9 @@ static void record_main_render_pass(vulkan_instance *VulkanInstance, assets *Ass
     vtk::validate_vk_result(vkEndCommandBuffer(CommandBuffer), "vkEndCommandBuffer", "error during render pass command recording");
 }
 
-static void update_entity_matrixes(VkDevice LogicalDevice, scene *Scene, glm::mat4 ViewProjectionMatrix, vtk::region *Region) {
-    if (Scene->Entities.Count == 0) return;
+static void update_entities(VkDevice LogicalDevice, scene *Scene, glm::mat4 ViewProjectionMatrix, vtk::region *Region) {
+    if (Scene->Entities.Count == 0)
+        return;
 
     // Entity Model Matrixes
     for (u32 EntityIndex = 0; EntityIndex < Scene->Entities.Count; ++EntityIndex) {
@@ -1147,36 +1188,8 @@ static void update_entity_matrixes(VkDevice LogicalDevice, scene *Scene, glm::ma
     vtk::write_to_host_region(LogicalDevice, Region, Scene->EntityMatrixUBOs.Data, ctk::byte_count(&Scene->EntityMatrixUBOs), 0);
 }
 
-static void update_lights(VkDevice LogicalDevice, state *State, glm::mat4 ViewProjectionMatrix, u32 SwapchainImageIndex) {
-    scene *Scene = &State->Scene;
-    if (Scene->Lights.Count == 0) return;
-
-    for (u32 LightIndex = 0; LightIndex < Scene->Lights.Count; ++LightIndex) {
-        ctk::vec3<f32>* LightPosition = &Scene->Lights[LightIndex].Position;
-        matrix_ubo *LightMatrixUBO = Scene->LightMatrixUBOs + LightIndex;
-        transform *LightTransform = Scene->LightTransforms + LightIndex;
-
-        // Position
-        *LightPosition = LightTransform->Position;
-
-        // Matrix
-        glm::mat4 ModelMatrix(1.0f);
-        ModelMatrix = glm::translate(ModelMatrix, { LightPosition->X, LightPosition->Y, LightPosition->Z });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(LightTransform->Rotation.X), { 1.0f, 0.0f, 0.0f });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(LightTransform->Rotation.Y), { 0.0f, 1.0f, 0.0f });
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(LightTransform->Rotation.Z), { 0.0f, 0.0f, 1.0f });
-        ModelMatrix = glm::scale(ModelMatrix, { 0.25f, 0.25f, 0.25f });
-        LightMatrixUBO->ModelMatrix = ModelMatrix;
-        LightMatrixUBO->ModelViewProjectionMatrix = ViewProjectionMatrix * ModelMatrix;
-    }
-
-    vtk::write_to_host_region(LogicalDevice, State->UniformBuffers.LightMatrixes.Regions + SwapchainImageIndex,
-                              Scene->LightMatrixUBOs.Data, ctk::byte_count(&Scene->LightMatrixUBOs), 0);
-    vtk::write_to_host_region(LogicalDevice, State->UniformBuffers.Lights.Regions + SwapchainImageIndex,
-                              &Scene->Lights, sizeof(Scene->Lights), 0);
-}
-
 static glm::mat4 light_view_projection_matrix(struct transform *t) {
+#if 1
     // View Matrix
     glm::vec3 light_pos = { t->Position.X, t->Position.Y, t->Position.Z };
     glm::mat4 light_trans_matrix(1.0f);
@@ -1191,9 +1204,56 @@ static glm::mat4 light_view_projection_matrix(struct transform *t) {
     glm::mat4 proj = glm::ortho(-10.0f, 10.0f, // left/right
                                 -10.0f, 10.0f, // bottom/top
                                 1.0f, 7.5f); // near/far
-    proj[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
+#else
+    // View Matrix
+    glm::vec3 pos = { t->Position.X, t->Position.Y, t->Position.Z };
+    glm::mat4 matrix(1.0f);
+    matrix = glm::rotate(matrix, glm::radians(t->Rotation.X), { 1.0f, 0.0f, 0.0f });
+    matrix = glm::rotate(matrix, glm::radians(t->Rotation.Y), { 0.0f, 1.0f, 0.0f });
+    matrix = glm::rotate(matrix, glm::radians(t->Rotation.Z), { 0.0f, 0.0f, 1.0f });
+    matrix = glm::translate(matrix, pos);
+    glm::vec3 forward = { matrix[0][2], matrix[1][2], matrix[2][2] };
+    glm::mat4 view = glm::lookAt(pos, pos + forward, { 0.0f, -1.0f, 0.0f });
 
+    // Projection Matrix
+    glm::mat4 proj = glm::perspective(glm::radians(90.0f), 1600.0f / 900.0f, 0.1f, 50.0f);
+#endif
+    // proj[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
     return proj * view;
+}
+
+static void update_lights(VkDevice LogicalDevice, state *State, glm::mat4 world_view_proj_mtx, u32 SwapchainImageIndex) {
+    scene *Scene = &State->Scene;
+
+    if (Scene->Lights.Count == 0)
+        return;
+
+    for (u32 i = 0; i < Scene->Lights.Count; ++i) {
+        ctk::vec3<f32>* LightPosition = &Scene->Lights[i].Position;
+        matrix_ubo *LightMatrixUBO = Scene->LightMatrixUBOs + i;
+        transform *light_trans = Scene->LightTransforms + i;
+
+        // Position
+        *LightPosition = light_trans->Position;
+
+        // World-Space Model Matrixes
+        glm::mat4 model_mtx(1.0f);
+        model_mtx = glm::translate(model_mtx, { LightPosition->X, LightPosition->Y, LightPosition->Z });
+        model_mtx = glm::rotate(model_mtx, glm::radians(light_trans->Rotation.X), { 1.0f, 0.0f, 0.0f });
+        model_mtx = glm::rotate(model_mtx, glm::radians(light_trans->Rotation.Y), { 0.0f, 1.0f, 0.0f });
+        model_mtx = glm::rotate(model_mtx, glm::radians(light_trans->Rotation.Z), { 0.0f, 0.0f, 1.0f });
+        model_mtx = glm::scale(model_mtx, { 0.25f, 0.25f, 0.25f });
+        LightMatrixUBO->ModelMatrix = model_mtx;
+        LightMatrixUBO->ModelViewProjectionMatrix = world_view_proj_mtx * model_mtx;
+
+        // Light-Space View-Projection Matrix
+        Scene->Lights[i].view_proj_mtx = light_view_projection_matrix(light_trans);
+    }
+
+    vtk::write_to_host_region(LogicalDevice, State->UniformBuffers.LightMatrixes.Regions + SwapchainImageIndex,
+                              Scene->LightMatrixUBOs.Data, ctk::byte_count(&Scene->LightMatrixUBOs), 0);
+    vtk::write_to_host_region(LogicalDevice, State->UniformBuffers.Lights.Regions + SwapchainImageIndex,
+                              &Scene->Lights, sizeof(Scene->Lights), 0);
 }
 
 ////////////////////////////////////////////////////////////
@@ -1203,7 +1263,8 @@ static bool list_box_begin(cstr id, cstr title, u32 item_count, u32 viewable_ite
     ImGui::PushItemWidth(-1);
     char imgui_id[256] = {};
     sprintf(imgui_id, "##%s", id);
-    if (title) ImGui::Text(title);
+    if (title)
+        ImGui::Text(title);
     return ImGui::ListBoxHeader(imgui_id, item_count, viewable_item_count);
 }
 
@@ -1372,7 +1433,6 @@ static void test_main() {
         glfwPollEvents();
         if (app.InputState->KeyDown[GLFW_KEY_ESCAPE])
             break;
-
         if (!app.UI->IO->WantCaptureKeyboard) {
             update_input_state(app.InputState, app.Window->Handle);
             controls(app.State, app.InputState);
@@ -1388,33 +1448,29 @@ static void test_main() {
         /// Render Pass Command Buffer Recording
         ////////////////////////////////////////////////////////////
 
-        // Shadow Map Rendering
-        {
-            glm::mat4 ViewProjectionMatrix(1.0f);
-            update_entity_matrixes(Device->Logical, &app.State->Scene, ViewProjectionMatrix, app.State->UniformBuffers.EntityMatrixes.Regions + SwapchainImageIndex);
+        // Update scene rendering data.
+        glm::mat4 cam_view_proj_mtx = camera_view_projection_matrix(&app.State->Scene.Camera);
+        update_entities(Device->Logical, &app.State->Scene, light_view_projection_matrix(app.State->Scene.LightTransforms + 0),
+                        app.State->UniformBuffers.ShadowMapEntityMatrixes.Regions + SwapchainImageIndex);
+        update_entities(Device->Logical, &app.State->Scene, cam_view_proj_mtx,
+                        app.State->UniformBuffers.EntityMatrixes.Regions + SwapchainImageIndex);
+        update_lights(Device->Logical, app.State, cam_view_proj_mtx, SwapchainImageIndex);
+        vtk::write_to_host_region(Device->Logical, app.State->UniformBuffers.Materials.Regions + SwapchainImageIndex,
+                                  app.State->Materials.Values, ctk::values_byte_count(&app.State->Materials), 0);
+        ui_new_frame();
+        draw_ui(app.UI, app.State, app.Window);
 
-            // Ensure command buffer is finished rendering before recording new commands.
-            vkWaitForFences(Device->Logical, 1, &app.State->Fences.ShadowMapFinished, VK_TRUE, UINT64_MAX);
-            vkResetFences(Device->Logical, 1, &app.State->Fences.ShadowMapFinished);
-            record_shadow_map_render_pass(app.VulkanInstance, app.State, SwapchainImageIndex);
-        }
+        // Shadow Map Rendering
+        // Ensure command buffer is finished rendering before recording new shadow map render pass commands.
+        vkWaitForFences(Device->Logical, 1, &app.State->Fences.ShadowMapFinished, VK_TRUE, UINT64_MAX);
+        vkResetFences(Device->Logical, 1, &app.State->Fences.ShadowMapFinished);
+        record_shadow_map_render_pass(app.VulkanInstance, app.State, SwapchainImageIndex);
 
         // Scene Rendering
-        {
-            glm::mat4 ViewProjectionMatrix = camera_view_projection_matrix(&app.State->Scene.Camera);
-            update_entity_matrixes(Device->Logical, &app.State->Scene, ViewProjectionMatrix, app.State->UniformBuffers.EntityMatrixes.Regions + SwapchainImageIndex);
-            update_lights(Device->Logical, app.State, ViewProjectionMatrix, SwapchainImageIndex);
-            vtk::write_to_host_region(Device->Logical, app.State->UniformBuffers.Materials.Regions + SwapchainImageIndex,
-                                      app.State->Materials.Values, ctk::values_byte_count(&app.State->Materials), 0);
-            record_main_render_pass(app.VulkanInstance, app.Assets, app.State, SwapchainImageIndex);
-        }
+        record_main_render_pass(app.VulkanInstance, app.Assets, app.State, SwapchainImageIndex);
 
         // UI Rendering
-        {
-            ui_new_frame();
-            draw_ui(app.UI, app.State, app.Window);
-            record_ui_render_pass(app.VulkanInstance, app.UI, SwapchainImageIndex);
-        }
+        record_ui_render_pass(app.VulkanInstance, app.UI, SwapchainImageIndex);
 
         ////////////////////////////////////////////////////////////
         /// Command Buffers Submission

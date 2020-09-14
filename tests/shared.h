@@ -18,6 +18,11 @@
 #include "gfx/imgui/imgui_impl_glfw.h"
 #include "gfx/imgui/imgui_impl_vulkan.h"
 
+#include "ctk/ctk.h"
+#include "ctk/math.h"
+#include "ctk/data.h"
+#include "vtk/vtk.h"
+
 ////////////////////////////////////////////////////////////
 /// Constants
 ////////////////////////////////////////////////////////////

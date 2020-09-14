@@ -1,8 +1,3 @@
-#include "ctk/ctk.h"
-#include "ctk/math.h"
-#include "ctk/data.h"
-#include "vtk/vtk.h"
-
 // Tests
 // #include "gfx/tests/default.h"
 // #include "gfx/tests/stencil.h"

@@ -61,12 +61,12 @@ lights [
     {
         transform {
             position [ 0 -4 0 ]
-            rotation [ -45 45 0 ]
+            rotation [ 45 -45 0 ]
         }
         color [ 1 1 1 1 ]
         attenuation_index 11
         intensity 1
-        ambient_intensity 0
+        ambient_intensity 0.1
     }
     # {
     #     transform { position [ 10 -0.5 16 ] }

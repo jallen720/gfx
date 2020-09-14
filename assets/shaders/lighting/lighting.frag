@@ -13,6 +13,7 @@ struct Light {
     float quadratic;
     float intensity;
     float ambient_intensity;
+    mat4 view_proj_mtx;
 };
 
 struct Material {
@@ -48,6 +49,7 @@ layout (push_constant) uniform PushConstants {
     int mode;
 } push_constants;
 
+layout (location = 0) in vec2 in_uv;
 layout (location = 0) out vec4 out_color;
 
 float attenuation(Light light, float light_distance) {
@@ -55,56 +57,100 @@ float attenuation(Light light, float light_distance) {
     return 1.0 / (1.0 + (light.linear * light_distance) + (light.quadratic * pow(light_distance, 2)));
 }
 
+float bias(Fragment fragment, vec3 light_dir) {
+    return max(0.5 * (1.0 - dot(fragment.normal, light_dir)), 0.005);
+}
+
+float textureProj(Fragment fragment, Light light, vec2 off) {
+    vec4 light_space_frag_pos = light.view_proj_mtx * vec4(fragment.position, 1);
+    float shadow = 0.0;
+    if (light_space_frag_pos.z > -1.0 && light_space_frag_pos.z < 1.0) {
+        float dist = texture(shadow_map, light_space_frag_pos.st + off).r;
+        if (light_space_frag_pos.w > 0.0 && dist < light_space_frag_pos.z)
+            shadow = 1.0;
+    }
+    return shadow;
+}
+
+float ShadowCalculation(Fragment fragment, Light light, vec3 light_dir) {
+    vec4 fragPosLightSpace = light.view_proj_mtx * vec4(fragment.position, 1);
+    // perform perspective divide
+    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    // transform to [0,1] range
+    projCoords = (projCoords * 0.5) + 0.5;
+    // get closest depth value from light's perspective (using [0,1] range fragPosLight as coords)
+    float closestDepth = texture(shadow_map, projCoords.xy).r;
+    // get depth of current fragment from light's perspective
+    float currentDepth = projCoords.z;
+    // check whether current frag pos is in shadow
+    float shadow = (currentDepth - bias(fragment, light_dir)) > closestDepth ? 1.0 : 0.0;
+
+    return shadow;
+}
+
+float my_shadow(Fragment fragment, Light light, vec3 light_dir) {
+    vec4 light_space_frag_pos = light.view_proj_mtx * vec4(fragment.position, 1);
+    vec3 proj_frag_pos = light_space_frag_pos.xyz / light_space_frag_pos.w;
+    proj_frag_pos = (proj_frag_pos * 0.5) + 0.5; // Adjust projected frag position from [-1,1] to [0,1].
+    float shadow_map_depth = texture(shadow_map, proj_frag_pos.xy).r;
+    float shadow_val = (proj_frag_pos.z - bias(fragment, light_dir)) > shadow_map_depth ? 1.0 : 0.0;
+    return shadow_val;
+}
+
 vec3 example_blinn_phong(Fragment fragment, Light light, Material material) {
     vec3 lightColor = light.color.rgb * light.intensity;
     vec3 lightPos = light.position;
 
-    // diffuse
+    // diff
     vec3 lightDir = normalize(lightPos - fragment.position);
-    float diff = max(dot(lightDir, fragment.normal), 0.0);
-    vec3 diffuse = diff * lightColor;
-    // specular
+    float diff_val = max(dot(lightDir, fragment.normal), 0.0);
+    vec3 diff = diff_val * lightColor;
+    // spec
     vec3 viewDir = normalize(push_constants.view_position - fragment.position);
     vec3 reflectDir = reflect(-lightDir, fragment.normal);
-    float spec = 0.0;
+    float spec_val = 0.0;
     vec3 halfwayDir = normalize(lightDir + viewDir);
-    spec = pow(max(dot(fragment.normal, halfwayDir), 0.0), material.shine_exponent);
-    vec3 specular = spec * lightColor;
+    spec_val = pow(max(dot(fragment.normal, halfwayDir), 0.0), material.shine_exponent);
+    vec3 spec = spec_val * lightColor;
 
-    return (diffuse + specular) * attenuation(light, distance(light.position, fragment.position));
+    return (diff + spec) * attenuation(light, distance(light.position, fragment.position));
 }
 
 vec4 my_blinn_phong(Fragment fragment, Light light, Material material) {
     vec4 light_color = light.color * light.intensity;
-    vec3 light_direction = normalize(light.position - fragment.position);
+    vec3 light_dir = normalize(light.position - fragment.position);
+
+    // Shadow
+    float shadow_val = ShadowCalculation(fragment, light, light_dir);
+    // float shadow_val = my_shadow(fragment, light, light_dir);
+    // float shadow_val = textureProj(fragment, light, vec2(0.0));
+    // float shadow_val = 0;
 
     // Ambient
     vec4 ambient = light_color * vec4(vec3(light.ambient_intensity), 1);
 
     // Diffuse
-    float diffuse_value = max(dot(fragment.normal, light_direction), 0.0);
-    vec4 diffuse = light_color * diffuse_value;
+    float diff_val = max(dot(fragment.normal, light_dir), 0.0);
+    vec4 diff = light_color * diff_val;
 
     // Specular
-    vec3 view_direction = normalize(push_constants.view_position - fragment.position);
+    vec3 view_dir = normalize(push_constants.view_position - fragment.position);
 #if 0
     // Phong
-    vec3 reflect_direction = reflect(-light_direction, fragment.normal);
-    float specular_value = pow(max(dot(view_direction, reflect_direction), 0.0), material.shine_exponent);
+    vec3 reflect_dir = reflect(-light_dir, fragment.normal);
+    float spec_val = pow(max(dot(view_dir, reflect_dir), 0.0), material.shine_exponent);
 #else
     // Blinn-Phong
-    vec3 half_direction = normalize(light_direction + view_direction);
-    float specular_value = pow(max(dot(fragment.normal, half_direction), 0.0), material.shine_exponent);
+    vec3 half_dir = normalize(light_dir + view_dir);
+    float spec_val = pow(max(dot(fragment.normal, half_dir), 0.0), material.shine_exponent);
 #endif
-    vec4 specular = fragment.albedo.a * light_color * specular_value;
+    vec4 spec = light_color * spec_val * fragment.albedo.a;
 
     // Final
-    return (diffuse + specular + ambient) * attenuation(light, distance(light.position, fragment.position));
+    return (ambient + ((1.0 - shadow_val) * (spec + diff))) * attenuation(light, distance(light.position, fragment.position));
 }
 
 void main() {
-    out_color = vec4(vec3(texture(shadow_map, gl_FragCoord.xy).r), 1);
-    return;
     Fragment fragment;
     fragment.albedo = vec4(subpassLoad(in_albedo).rgb, 1);
     fragment.position = subpassLoad(in_position).rgb;
@@ -114,8 +160,8 @@ void main() {
         case MODE_COMPOSITE: {
             vec4 total_light_color = vec4(0);
             Material material = materials.data[fragment.material_index];
-            for (uint light_index = 0; light_index < lights.count; ++light_index) {
-                Light light = lights.data[light_index];
+            for (uint i = 0; i < lights.count; ++i) {
+                Light light = lights.data[i];
                 total_light_color += my_blinn_phong(fragment, light, material);
             }
             out_color = fragment.albedo * total_light_color;
@@ -143,28 +189,28 @@ void main() {
 
 vec4 my_blinn_phong_v0(Fragment fragment, Light light, Material material) {
     vec4 light_color = light.color * light.intensity;
-    vec3 light_direction = normalize(light.position - fragment.position);
+    vec3 light_dir = normalize(light.position - fragment.position);
 
     // Ambient
     vec4 ambient = light_color * vec4(vec3(light.ambient_intensity), 1);
 
     // Diffuse
-    float diffuse_value = max(dot(fragment.normal, light_direction), 0.0);
-    vec4 diffuse = light_color * diffuse_value;
+    float diff_val = max(dot(fragment.normal, light_dir), 0.0);
+    vec4 diff = light_color * diff_val;
 
     // Specular
-    vec3 view_direction = normalize(push_constants.view_position - fragment.position);
+    vec3 view_dir = normalize(push_constants.view_position - fragment.position);
 #if 0
     // Phong
-    vec3 reflect_direction = reflect(-light_direction, fragment.normal);
-    float specular_value = pow(max(dot(view_direction, reflect_direction), 0.0), material.shine_exponent);
+    vec3 reflect_dir = reflect(-light_dir, fragment.normal);
+    float spec_val = pow(max(dot(view_dir, reflect_dir), 0.0), material.shine_exponent);
 #else
     // Blinn-Phong
-    vec3 half_direction = normalize(light_direction + view_direction);
-    float specular_value = pow(max(dot(fragment.normal, half_direction), 0.0), material.shine_exponent);
+    vec3 half_dir = normalize(light_dir + view_dir);
+    float spec_val = pow(max(dot(fragment.normal, half_dir), 0.0), material.shine_exponent);
 #endif
-    vec4 specular = fragment.albedo.a * light_color * specular_value;
+    vec4 spec = fragment.albedo.a * light_color * spec_val;
 
     // Final
-    return (diffuse + specular + ambient) * attenuation(light, distance(light.position, fragment.position));
+    return (diff + spec + ambient) * attenuation(light, distance(light.position, fragment.position));
 }
