@@ -105,8 +105,7 @@ static void create_buffers(struct vk_core *vk) {
 
 static void init_vk_core(struct vk_core *vk, struct window *window) {
     vk->instance = vtk_create_instance();
-    vtk_validate_result(glfwCreateWindowSurface(vk->instance.handle, window->handle, NULL, &vk->surface),
-                        "failed to create glfw surface");
+    vtk_validate_result(glfwCreateWindowSurface(vk->instance.handle, window->handle, NULL, &vk->surface), "failed to create glfw surface");
 
     VkPhysicalDeviceFeatures features = {};
     features.geometryShader = VK_TRUE;
@@ -119,8 +118,7 @@ static void init_vk_core(struct vk_core *vk, struct window *window) {
     cmd_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     cmd_pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     cmd_pool_info.queueFamilyIndex = vk->device.queue_family_indexes.graphics;
-    vtk_validate_result(vkCreateCommandPool(vk->device.logical, &cmd_pool_info, NULL, &vk->graphics_cmd_pool),
-                        "failed to create command pool");
+    vtk_validate_result(vkCreateCommandPool(vk->device.logical, &cmd_pool_info, NULL, &vk->graphics_cmd_pool), "failed to create command pool");
 
     create_buffers(vk);
     vk->staging_region = vtk_allocate_region(&vk->buffers.host, 64 * CTK_MEGABYTE);
@@ -458,8 +456,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk, struct a
     pool_info.maxSets = 64;
     pool_info.poolSizeCount = CTK_ARRAY_COUNT(pool_sizes);
     pool_info.pPoolSizes = pool_sizes;
-    vtk_validate_result(vkCreateDescriptorPool(vk->device.logical, &pool_info, NULL, &app->descriptor.pool),
-                        "failed to create descriptor pool");
+    vtk_validate_result(vkCreateDescriptorPool(vk->device.logical, &pool_info, NULL, &app->descriptor.pool), "failed to create descriptor pool");
 
     // Layouts
 
@@ -470,8 +467,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk, struct a
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
         info.pBindings = &binding;
-        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptor.set_layouts.entity_model_mtxs),
-                            "error creating descriptor set layout");
+        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptor.set_layouts.entity_model_mtxs), "error creating descriptor set layout");
     }
 
     // texture
@@ -481,8 +477,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk, struct a
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
         info.pBindings = &binding;
-        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptor.set_layouts.texture),
-                            "error creating descriptor set layout");
+        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptor.set_layouts.texture), "error creating descriptor set layout");
     }
 
     // Sets
@@ -888,7 +883,7 @@ static void submit_command_buffers(struct app *app, struct vk_core *vk, u32 swap
 /// Synchronization
 ////////////////////////////////////////////////////////////
 static u32 vtk_aquire_swapchain_image_index(struct app *app, struct vk_core *vk) {
-    u32 swapchain_img_idx = VTK_UNSET_INDEX;
+    u32 swapchain_img_idx = CTK_U32_MAX;
     vtk_validate_result(vkAcquireNextImageKHR(vk->device.logical, vk->swapchain.handle, CTK_U64_MAX, app->frame_sync.img_aquired[app->frame_sync.curr_frame],
                                               VK_NULL_HANDLE, &swapchain_img_idx),
                         "failed to aquire next swapchain image");
