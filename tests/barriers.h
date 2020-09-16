@@ -74,7 +74,6 @@ struct vk_core {
     struct vtk_device device;
     struct vtk_swapchain swapchain;
     VkCommandPool graphics_cmd_pool;
-    VkCommandBuffer one_time_cmd_buf;
     struct {
         struct vtk_buffer device;
         struct vtk_buffer host;
@@ -122,11 +121,10 @@ static void init_vk_core(struct vk_core *vk, struct window *window) {
 
     create_buffers(vk);
     vk->staging_region = vtk_allocate_region(&vk->buffers.host, 64 * CTK_MEGABYTE);
-    vk->one_time_cmd_buf = vtk_allocate_command_buffer(vk->device.logical, vk->graphics_cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
 }
 
 ////////////////////////////////////////////////////////////
-/// Assets
+/// App
 ////////////////////////////////////////////////////////////
 struct asset_info {
     cstr name;
@@ -161,13 +159,193 @@ struct mesh {
     struct vtk_region index_region;
 };
 
-struct assets {
-    struct ctk_map<struct vtk_shader, 16> shaders;
-    struct ctk_map<struct texture, 16> textures;
-    struct ctk_map<struct mesh, 16> meshes;
+struct model_mtxs {
+    glm::mat4 model;
+    glm::mat4 mvp;
 };
 
-static void load_mesh(struct mesh *mesh, cstr path, struct vk_core *vk) {
+struct app {
+    struct vtk_vertex_layout vertex_layout;
+    struct {
+        struct vtk_uniform_buffer entity_model_mtxs;
+    } uniform_buffers;
+    struct {
+        struct vtk_image depth;
+    } attachment_images;
+    struct {
+        VkCommandBuffer one_time;
+        struct ctk_array<VkCommandBuffer, 4> render;
+    } cmd_bufs;
+    struct {
+        struct ctk_map<struct vtk_shader, 16> shaders;
+        struct ctk_map<struct texture, 16> textures;
+        struct ctk_map<struct mesh, 16> meshes;
+    } assets;
+    struct {
+        VkDescriptorPool pool;
+        struct {
+            VkDescriptorSetLayout entity_model_mtxs;
+            VkDescriptorSetLayout texture;
+        } set_layouts;
+        struct {
+            struct vtk_descriptor_set entity_model_mtxs;
+            struct ctk_map<struct vtk_descriptor_set, 16> textures;
+        } sets;
+    } descriptor;
+    struct {
+        struct vtk_render_pass main;
+    } render_passes;
+    struct {
+        struct vtk_graphics_pipeline main;
+    } graphics_pipelines;
+    struct {
+        struct ctk_array<VkSemaphore, 4> img_aquired;
+        struct ctk_array<u32, 4> img_prev_frame;
+        struct ctk_array<VkSemaphore, 4> render_finished;
+        struct ctk_array<VkFence, 4> in_flight;
+        u32 curr_frame;
+        u32 frame_count;
+    } frame_sync;
+};
+
+static void load_texture(struct texture *tex, cstr path, VkFilter filter, struct app *app, struct vk_core *vk) {
+    CTK_TODO("batch mem barriers")
+
+    // Load image from path and write its data to staging region.
+    s32 width = 0;
+    s32 height = 0;
+    s32 channel_count = 0;
+    stbi_uc *data = stbi_load(path, &width, &height, &channel_count, STBI_rgb_alpha);
+    if (data == NULL)
+        CTK_FATAL("failed to load image from \"%s\"", path)
+    vtk_write_to_host_region(vk->device.logical, data, width * height * STBI_rgb_alpha, &vk->staging_region, 0);
+    stbi_image_free(data);
+
+    VkImageCreateInfo image_info = {};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.flags = 0;
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+    image_info.extent.width = width;
+    image_info.extent.height = height;
+    image_info.extent.depth = 1;
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    image_info.queueFamilyIndexCount = 0;
+    image_info.pQueueFamilyIndices = NULL; // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    vtk_validate_result(vkCreateImage(vk->device.logical, &image_info, NULL, &tex->image), "failed to create image");
+
+    VkMemoryRequirements mem_reqs = {};
+    vkGetImageMemoryRequirements(vk->device.logical, tex->image, &mem_reqs);
+    tex->memory = vtk_allocate_device_memory(&vk->device, &mem_reqs, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    vtk_validate_result(vkBindImageMemory(vk->device.logical, tex->image, tex->memory, 0), "failed to bind image memory");
+
+    // Copy image data (now in staging region) to texture image memory, transitioning texture image layout with pipeline barriers as necessary.
+    vtk_begin_one_time_command_buffer(app->cmd_bufs.one_time);
+        VkImageMemoryBarrier pre_mem_barrier = {};
+        pre_mem_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        pre_mem_barrier.srcAccessMask = 0;
+        pre_mem_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        pre_mem_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        pre_mem_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        pre_mem_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        pre_mem_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        pre_mem_barrier.image = tex->image;
+        pre_mem_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        pre_mem_barrier.subresourceRange.baseMipLevel = 0;
+        pre_mem_barrier.subresourceRange.levelCount = 1;
+        pre_mem_barrier.subresourceRange.baseArrayLayer = 0;
+        pre_mem_barrier.subresourceRange.layerCount = 1;
+        vkCmdPipelineBarrier(app->cmd_bufs.one_time,
+                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, // Dependency Flags
+                             0, NULL, // Memory Barriers
+                             0, NULL, // Buffer Memory Barriers
+                             1, &pre_mem_barrier); // Image Memory Barriers
+
+        VkBufferImageCopy copy = {};
+        copy.bufferOffset = 0;
+        copy.bufferRowLength = 0;
+        copy.bufferImageHeight = 0;
+        copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copy.imageSubresource.mipLevel = 0;
+        copy.imageSubresource.baseArrayLayer = 0;
+        copy.imageSubresource.layerCount = 1;
+        copy.imageOffset.x = 0;
+        copy.imageOffset.y = 0;
+        copy.imageOffset.z = 0;
+        copy.imageExtent.width = width;
+        copy.imageExtent.height = height;
+        copy.imageExtent.depth = 1;
+        vkCmdCopyBufferToImage(app->cmd_bufs.one_time, vk->staging_region.buffer->handle, tex->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+        VkImageMemoryBarrier post_mem_barrier = {};
+        post_mem_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        post_mem_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        post_mem_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        post_mem_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        post_mem_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        post_mem_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        post_mem_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        post_mem_barrier.image = tex->image;
+        post_mem_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        post_mem_barrier.subresourceRange.baseMipLevel = 0;
+        post_mem_barrier.subresourceRange.levelCount = 1;
+        post_mem_barrier.subresourceRange.baseArrayLayer = 0;
+        post_mem_barrier.subresourceRange.layerCount = 1;
+        vkCmdPipelineBarrier(app->cmd_bufs.one_time,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                             0, // Dependency Flags
+                             0, NULL, // Memory Barriers
+                             0, NULL, // Buffer Memory Barriers
+                             1, &post_mem_barrier); // Image Memory Barriers
+    vtk_submit_one_time_command_buffer(app->cmd_bufs.one_time, vk->device.queues.graphics);
+
+    VkImageViewCreateInfo view_info = {};
+    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.image = tex->image;
+    view_info.flags = 0;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format = image_info.format;
+    view_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.baseMipLevel = 0;
+    view_info.subresourceRange.levelCount = 1;
+    view_info.subresourceRange.baseArrayLayer = 0;
+    view_info.subresourceRange.layerCount = 1;
+    vtk_validate_result(vkCreateImageView(vk->device.logical, &view_info, NULL, &tex->view), "failed to create image view");
+
+    VkSamplerCreateInfo sampler_info = {};
+    sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_info.magFilter = filter;
+    sampler_info.minFilter = filter;
+    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_info.anisotropyEnable = VK_TRUE;
+    sampler_info.maxAnisotropy = 16;
+    sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    sampler_info.unnormalizedCoordinates = VK_FALSE;
+    sampler_info.compareEnable = VK_FALSE;
+    sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
+    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler_info.mipLodBias = 0.0f;
+    sampler_info.minLod = 0.0f;
+    sampler_info.maxLod = 0.0f;
+    vtk_validate_result(vkCreateSampler(vk->device.logical, &sampler_info, NULL, &tex->sampler), "failed to create texture sampler");
+}
+
+static void load_mesh(struct mesh *mesh, cstr path, struct app *app, struct vk_core *vk) {
     u32 process_flags = aiProcess_CalcTangentSpace |
                         aiProcess_Triangulate |
                         aiProcess_JoinIdenticalVertices |
@@ -220,164 +398,26 @@ static void load_mesh(struct mesh *mesh, cstr path, struct vk_core *vk) {
     u32 idxs_byte_size = ctk_byte_size(&mesh->indexes);
     mesh->vertex_region = vtk_allocate_region(&vk->buffers.device, verts_byte_size, 4);
     mesh->index_region = vtk_allocate_region(&vk->buffers.device, idxs_byte_size, 4);
-    vtk_begin_one_time_command_buffer(vk->one_time_cmd_buf);
-        vtk_write_to_device_region(&vk->device, vk->one_time_cmd_buf, mesh->vertexes.data, verts_byte_size,
+    vtk_begin_one_time_command_buffer(app->cmd_bufs.one_time);
+        vtk_write_to_device_region(&vk->device, app->cmd_bufs.one_time, mesh->vertexes.data, verts_byte_size,
                                    &vk->staging_region, 0, &mesh->vertex_region, 0);
-        vtk_write_to_device_region(&vk->device, vk->one_time_cmd_buf, mesh->indexes.data, idxs_byte_size,
+        vtk_write_to_device_region(&vk->device, app->cmd_bufs.one_time, mesh->indexes.data, idxs_byte_size,
                                    &vk->staging_region, verts_byte_size, &mesh->index_region, 0);
-    vtk_submit_one_time_command_buffer(vk->one_time_cmd_buf, vk->device.queues.graphics);
+    vtk_submit_one_time_command_buffer(app->cmd_bufs.one_time, vk->device.queues.graphics);
 
     // Cleanup
     aiReleaseImport(scene);
 }
 
-static void load_texture(struct texture *tex, cstr path, struct vk_core *vk, VkFilter filter) {
-    CTK_TODO("batch mem barriers")
-
-    // Load image from path and write its data to staging region.
-    s32 width = 0;
-    s32 height = 0;
-    s32 channel_count = 0;
-    stbi_uc *data = stbi_load(path, &width, &height, &channel_count, STBI_rgb_alpha);
-    if (data == NULL)
-        CTK_FATAL("failed to load image from \"%s\"", path)
-    vtk_write_to_host_region(vk->device.logical, data, width * height * STBI_rgb_alpha, &vk->staging_region, 0);
-    stbi_image_free(data);
-
-    VkImageCreateInfo image_info = {};
-    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    image_info.flags = 0;
-    image_info.imageType = VK_IMAGE_TYPE_2D;
-    image_info.format = VK_FORMAT_R8G8B8A8_UNORM;
-    image_info.extent.width = width;
-    image_info.extent.height = height;
-    image_info.extent.depth = 1;
-    image_info.mipLevels = 1;
-    image_info.arrayLayers = 1;
-    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
-    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    image_info.queueFamilyIndexCount = 0;
-    image_info.pQueueFamilyIndices = NULL; // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
-    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    vtk_validate_result(vkCreateImage(vk->device.logical, &image_info, NULL, &tex->image), "failed to create image");
-
-    VkMemoryRequirements mem_reqs = {};
-    vkGetImageMemoryRequirements(vk->device.logical, tex->image, &mem_reqs);
-    tex->memory = vtk_allocate_device_memory(&vk->device, &mem_reqs, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    vtk_validate_result(vkBindImageMemory(vk->device.logical, tex->image, tex->memory, 0), "failed to bind image memory");
-
-    // Copy image data (now in staging region) to texture image memory, transitioning texture image layout with pipeline barriers as necessary.
-    vtk_begin_one_time_command_buffer(vk->one_time_cmd_buf);
-        VkImageMemoryBarrier pre_mem_barrier = {};
-        pre_mem_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        pre_mem_barrier.srcAccessMask = 0;
-        pre_mem_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        pre_mem_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        pre_mem_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        pre_mem_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        pre_mem_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        pre_mem_barrier.image = tex->image;
-        pre_mem_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        pre_mem_barrier.subresourceRange.baseMipLevel = 0;
-        pre_mem_barrier.subresourceRange.levelCount = 1;
-        pre_mem_barrier.subresourceRange.baseArrayLayer = 0;
-        pre_mem_barrier.subresourceRange.layerCount = 1;
-        vkCmdPipelineBarrier(vk->one_time_cmd_buf,
-                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0, // Dependency Flags
-                             0, NULL, // Memory Barriers
-                             0, NULL, // Buffer Memory Barriers
-                             1, &pre_mem_barrier); // Image Memory Barriers
-
-        VkBufferImageCopy copy = {};
-        copy.bufferOffset = 0;
-        copy.bufferRowLength = 0;
-        copy.bufferImageHeight = 0;
-        copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        copy.imageSubresource.mipLevel = 0;
-        copy.imageSubresource.baseArrayLayer = 0;
-        copy.imageSubresource.layerCount = 1;
-        copy.imageOffset.x = 0;
-        copy.imageOffset.y = 0;
-        copy.imageOffset.z = 0;
-        copy.imageExtent.width = width;
-        copy.imageExtent.height = height;
-        copy.imageExtent.depth = 1;
-        vkCmdCopyBufferToImage(vk->one_time_cmd_buf, vk->staging_region.buffer->handle, tex->image,
-                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-
-        VkImageMemoryBarrier post_mem_barrier = {};
-        post_mem_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        post_mem_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        post_mem_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        post_mem_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        post_mem_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        post_mem_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        post_mem_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        post_mem_barrier.image = tex->image;
-        post_mem_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        post_mem_barrier.subresourceRange.baseMipLevel = 0;
-        post_mem_barrier.subresourceRange.levelCount = 1;
-        post_mem_barrier.subresourceRange.baseArrayLayer = 0;
-        post_mem_barrier.subresourceRange.layerCount = 1;
-        vkCmdPipelineBarrier(vk->one_time_cmd_buf,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                             0, // Dependency Flags
-                             0, NULL, // Memory Barriers
-                             0, NULL, // Buffer Memory Barriers
-                             1, &post_mem_barrier); // Image Memory Barriers
-    vtk_submit_one_time_command_buffer(vk->one_time_cmd_buf, vk->device.queues.graphics);
-
-    VkImageViewCreateInfo view_info = {};
-    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    view_info.image = tex->image;
-    view_info.flags = 0;
-    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    view_info.format = image_info.format;
-    view_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-    view_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-    view_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-    view_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    view_info.subresourceRange.baseMipLevel = 0;
-    view_info.subresourceRange.levelCount = 1;
-    view_info.subresourceRange.baseArrayLayer = 0;
-    view_info.subresourceRange.layerCount = 1;
-    vtk_validate_result(vkCreateImageView(vk->device.logical, &view_info, NULL, &tex->view), "failed to create image view");
-
-    VkSamplerCreateInfo sampler_info = {};
-    sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampler_info.magFilter = filter;
-    sampler_info.minFilter = filter;
-    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.anisotropyEnable = VK_TRUE;
-    sampler_info.maxAnisotropy = 16;
-    sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-    sampler_info.unnormalizedCoordinates = VK_FALSE;
-    sampler_info.compareEnable = VK_FALSE;
-    sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
-    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    sampler_info.mipLodBias = 0.0f;
-    sampler_info.minLod = 0.0f;
-    sampler_info.maxLod = 0.0f;
-    vtk_validate_result(vkCreateSampler(vk->device.logical, &sampler_info, NULL, &tex->sampler), "failed to create texture sampler");
-}
-
-static void load_assets(struct assets *assets, struct vk_core *vk) {
+static void load_assets(struct app *app, struct vk_core *vk) {
     // Shaders
     struct shader_info shader_infos[] = {
         { "barriers_shadow_vert", "assets/shaders/barriers/shadow.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
         { "barriers_shadow_frag", "assets/shaders/barriers/shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
     };
     for (u32 i = 0; i < CTK_ARRAY_COUNT(shader_infos); ++i) {
-        ctk_push(&assets->shaders, shader_infos[i].name,
-                 vtk_create_shader(vk->device.logical, shader_infos[i].path, shader_infos[i].stage));
+        struct shader_info *shader_info = shader_infos + i;
+        ctk_push(&app->assets.shaders, shader_info->name, vtk_create_shader(vk->device.logical, shader_info->path, shader_info->stage));
     }
 
     // Textures
@@ -386,7 +426,7 @@ static void load_assets(struct assets *assets, struct vk_core *vk) {
     };
     for (u32 i = 0; i < CTK_ARRAY_COUNT(texture_infos); ++i) {
         struct texture_info *info = texture_infos + i;
-        load_texture(ctk_push(&assets->textures, info->name), info->path, vk, info->filter);
+        load_texture(ctk_push(&app->assets.textures, info->name), info->path, info->filter, app, vk);
     }
 
     // Meshes
@@ -395,54 +435,13 @@ static void load_assets(struct assets *assets, struct vk_core *vk) {
         { "true_cube", "assets/models/true_cube.obj" },
         { "quad", "assets/models/quad.obj" },
     };
-    for (u32 i = 0; i < CTK_ARRAY_COUNT(mesh_infos); ++i)
-        load_mesh(ctk_push(&assets->meshes, mesh_infos[i].name), mesh_infos[i].path, vk);
+    for (u32 i = 0; i < CTK_ARRAY_COUNT(mesh_infos); ++i) {
+        struct asset_info *mesh_info = mesh_infos + i;
+        load_mesh(ctk_push(&app->assets.meshes, mesh_info->name), mesh_info->path, app, vk);
+    }
 }
 
-////////////////////////////////////////////////////////////
-/// App
-////////////////////////////////////////////////////////////
-struct model_mtxs {
-    glm::mat4 model;
-    glm::mat4 mvp;
-};
-
-struct app {
-    struct vtk_vertex_layout vertex_layout;
-    struct {
-        struct vtk_uniform_buffer entity_model_mtxs;
-    } uniform_buffers;
-    struct {
-        struct vtk_image depth;
-    } attachment_images;
-    struct {
-        VkDescriptorPool pool;
-        struct {
-            VkDescriptorSetLayout entity_model_mtxs;
-            VkDescriptorSetLayout texture;
-        } set_layouts;
-        struct {
-            struct vtk_descriptor_set entity_model_mtxs;
-            struct ctk_map<struct vtk_descriptor_set, 16> textures;
-        } sets;
-    } descriptor;
-    struct {
-        struct vtk_render_pass main;
-    } render_passes;
-    struct {
-        struct vtk_graphics_pipeline main;
-    } graphics_pipelines;
-    struct {
-        struct ctk_array<VkSemaphore, 4> img_aquired;
-        struct ctk_array<u32, 4> img_prev_frame;
-        struct ctk_array<VkSemaphore, 4> render_finished;
-        struct ctk_array<VkFence, 4> in_flight;
-        u32 curr_frame;
-        u32 frame_count;
-    } frame_sync;
-};
-
-static void create_descriptor_sets(struct app *app, struct vk_core *vk, struct assets *assets) {
+static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
     // Pool
     VkDescriptorPoolSize pool_sizes[] = {
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 16 },
@@ -488,8 +487,8 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk, struct a
     ctk_push(&app->descriptor.sets.entity_model_mtxs.dynamic_offsets, app->uniform_buffers.entity_model_mtxs.element_size);
 
     // textures
-    for (u32 i = 0; i < assets->textures.count; ++i) {
-        struct vtk_descriptor_set *ds = ctk_push(&app->descriptor.sets.textures, assets->textures.keys[i]);
+    for (u32 i = 0; i < app->assets.textures.count; ++i) {
+        struct vtk_descriptor_set *ds = ctk_push(&app->descriptor.sets.textures, app->assets.textures.keys[i]);
         ds->instances.count = 1;
 
         VkDescriptorSetAllocateInfo info = {};
@@ -524,15 +523,15 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk, struct a
     }
 
     // textures
-    for (u32 i = 0; i < assets->textures.count; ++i) {
-        struct texture *t = assets->textures.values + i;
+    for (u32 i = 0; i < app->assets.textures.count; ++i) {
+        struct texture *t = app->assets.textures.values + i;
 
         VkDescriptorImageInfo *info = ctk_push(&img_infos);
         info->sampler = t->sampler;
         info->imageView = t->view;
         info->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-        struct vtk_descriptor_set *ds = ctk_at(&app->descriptor.sets.textures, assets->textures.keys[i]);
+        struct vtk_descriptor_set *ds = ctk_at(&app->descriptor.sets.textures, app->assets.textures.keys[i]);
         VkWriteDescriptorSet *write = ctk_push(&writes);
         write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         write->dstSet = ds->instances[0];
@@ -602,12 +601,12 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
     }
 }
 
-static void create_graphics_pipelines(struct app *app, struct vk_core *vk, struct assets *assets) {
+static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
     // Main
     {
         struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
-        ctk_push(&info.shaders, ctk_at(&assets->shaders, "barriers_shadow_vert"));
-        ctk_push(&info.shaders, ctk_at(&assets->shaders, "barriers_shadow_frag"));
+        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "barriers_shadow_vert"));
+        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "barriers_shadow_frag"));
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.entity_model_mtxs);
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.texture);
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
@@ -647,7 +646,7 @@ static void init_frame_sync(struct app *app, struct vk_core *vk) {
         app->frame_sync.img_prev_frame[i] = CTK_U32_MAX;
 }
 
-static void init_app(struct app *app, struct vk_core *vk, struct assets *assets) {
+static void init_app(struct app *app, struct vk_core *vk) {
     // Vertex Layout
     vtk_push_vertex_attribute(&app->vertex_layout, "position", 3);
     vtk_push_vertex_attribute(&app->vertex_layout, "normal", 3);
@@ -667,64 +666,69 @@ static void init_app(struct app *app, struct vk_core *vk, struct assets *assets)
     depth_image_info.aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT;
     app->attachment_images.depth = vtk_create_image(&vk->device, &depth_image_info);
 
-    create_descriptor_sets(app, vk, assets);
+    // Command Buffers
+    app->cmd_bufs.one_time = vtk_allocate_command_buffer(vk->device.logical, vk->graphics_cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    app->cmd_bufs.render.count = vk->swapchain.image_count;
+    vtk_allocate_command_buffers(vk->device.logical, vk->graphics_cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, app->cmd_bufs.render.count, app->cmd_bufs.render.data);
+
+    load_assets(app, vk);
+    create_descriptor_sets(app, vk);
     create_render_passes(app, vk);
-    create_graphics_pipelines(app, vk, assets);
+    create_graphics_pipelines(app, vk);
     init_frame_sync(app, vk);
 }
 
-static void record_render_passes(struct app *app, struct vk_core *vk, struct assets *assets, u32 swapchain_img_idx) {
-    // Shadow
-    {
+static void record_render_passes(struct app *app, struct vk_core *vk, u32 swapchain_img_idx) {
+    VkCommandBufferBeginInfo cmd_buf_begin_info = {};
+    cmd_buf_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    cmd_buf_begin_info.flags = 0;
+    cmd_buf_begin_info.pInheritanceInfo = NULL;
 
-    }
+    VkCommandBuffer cmd_buf = app->cmd_bufs.render[swapchain_img_idx];
+    vtk_validate_result(vkBeginCommandBuffer(cmd_buf, &cmd_buf_begin_info), "failed to begin recording command buffer");
+        // Shadow
+        {
 
-    // Main
-    {
-        struct vtk_render_pass *rp = &app->render_passes.main;
+        }
 
-        VkCommandBufferBeginInfo cmd_buf_begin_info = {};
-        cmd_buf_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        cmd_buf_begin_info.flags = 0;
-        cmd_buf_begin_info.pInheritanceInfo = NULL;
+        // Main
+        {
+            struct vtk_render_pass *rp = &app->render_passes.main;
 
-        VkCommandBuffer cmd_buf = rp->command_buffers[swapchain_img_idx];
-        vtk_validate_result(vkBeginCommandBuffer(cmd_buf, &cmd_buf_begin_info), "failed to begin recording command buffer");
+            VkRect2D render_area = {};
+            render_area.offset.x = 0;
+            render_area.offset.y = 0;
+            render_area.extent = vk->swapchain.extent;
 
-        VkRect2D render_area = {};
-        render_area.offset.x = 0;
-        render_area.offset.y = 0;
-        render_area.extent = vk->swapchain.extent;
+            VkRenderPassBeginInfo rp_begin_info = {};
+            rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            rp_begin_info.renderPass = rp->handle;
+            rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
+            rp_begin_info.renderArea = render_area;
+            rp_begin_info.clearValueCount = rp->clear_values.count;
+            rp_begin_info.pClearValues = rp->clear_values.data;
 
-        VkRenderPassBeginInfo rp_begin_info = {};
-        rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        rp_begin_info.renderPass = rp->handle;
-        rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
-        rp_begin_info.renderArea = render_area;
-        rp_begin_info.clearValueCount = rp->clear_values.count;
-        rp_begin_info.pClearValues = rp->clear_values.data;
+            vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+                struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.main;
+                struct vtk_descriptor_set *desc_sets[] = {
+                    &app->descriptor.sets.entity_model_mtxs,
+                };
+                struct vtk_descriptor_set *tex_desc_sets[] = {
+                    ctk_at(&app->descriptor.sets.textures, "wood")
+                };
+                struct mesh *mesh = ctk_at(&app->assets.meshes, "cube");
 
-        vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-            struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.main;
-            struct vtk_descriptor_set *desc_sets[] = {
-                &app->descriptor.sets.entity_model_mtxs,
-            };
-            struct vtk_descriptor_set *tex_desc_sets[] = {
-                ctk_at(&app->descriptor.sets.textures, "wood")
-            };
-            struct mesh *mesh = ctk_at(&assets->meshes, "cube");
-
-            // CTK_REPEAT(10000) {
-                vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
-                vtk_bind_descriptor_sets(cmd_buf, gp->layout, desc_sets, CTK_ARRAY_COUNT(desc_sets), 0, swapchain_img_idx, 0);
-                vtk_bind_descriptor_sets(cmd_buf, gp->layout, tex_desc_sets, CTK_ARRAY_COUNT(tex_desc_sets), 1, 0, 0);
-                vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
-                vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
-                vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
-            // }
-        vkCmdEndRenderPass(cmd_buf);
-        vtk_validate_result(vkEndCommandBuffer(cmd_buf), "error during render pass command recording");
-    }
+                // CTK_REPEAT(10000) {
+                    vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
+                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, desc_sets, CTK_ARRAY_COUNT(desc_sets), 0, swapchain_img_idx, 0);
+                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, tex_desc_sets, CTK_ARRAY_COUNT(tex_desc_sets), 1, 0, 0);
+                    vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
+                    vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
+                    vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
+                // }
+            vkCmdEndRenderPass(cmd_buf);
+        }
+    vtk_validate_result(vkEndCommandBuffer(cmd_buf), "error during render pass command recording");
 }
 
 ////////////////////////////////////////////////////////////
@@ -830,7 +834,7 @@ static void submit_command_buffers(struct app *app, struct vk_core *vk, u32 swap
     // Render
     {
         VkCommandBuffer cmd_bufs[] = {
-            app->render_passes.main.command_buffers[swapchain_img_idx],
+            app->cmd_bufs.render[swapchain_img_idx],
         };
         VkSemaphore wait_semaphores[] = {
             app->frame_sync.img_aquired[app->frame_sync.curr_frame],
@@ -985,13 +989,11 @@ static void camera_controls(struct transform *cam_trans, struct window *window) 
 void test_main() {
     struct window window = {};
     struct vk_core vk = {};
-    struct assets assets = {};
     struct app app = {};
     struct scene scene = {};
     init_window(&window);
     init_vk_core(&vk, &window);
-    load_assets(&assets, &vk);
-    init_app(&app, &vk, &assets);
+    init_app(&app, &vk);
     init_scene(&scene, &vk);
     while (!glfwWindowShouldClose(window.handle)) {
         // Input
@@ -1004,7 +1006,7 @@ void test_main() {
         // Rendering
         u32 swapchain_img_idx = vtk_aquire_swapchain_image_index(&app, &vk);
         sync_frame(&app, &vk, swapchain_img_idx);
-        record_render_passes(&app, &vk, &assets, swapchain_img_idx);
+        record_render_passes(&app, &vk, swapchain_img_idx);
         update_scene(&scene, &vk, &app, swapchain_img_idx);
         submit_command_buffers(&app, &vk, swapchain_img_idx);
         cycle_frame(&app);
