@@ -1,6 +1,6 @@
-# Blender v2.82 (sub 7) OBJ File: 'fullscreen_plane.blend'
+# Blender v2.82 (sub 7) OBJ File: 'fullscreen_quad.blend'
 # www.blender.org
-mtllib fullscreen_plane.mtl
+mtllib fullscreen_quad.mtl
 o fullscreen_plane_mesh
 v -1.000000 1.000000 0.000000
 v -1.000000 -1.000000 0.000000
