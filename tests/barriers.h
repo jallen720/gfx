@@ -16,6 +16,10 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 
+#include "gfx/imgui/imgui.h"
+#include "gfx/imgui/imgui_impl_glfw.h"
+#include "gfx/imgui/imgui_impl_vulkan.h"
+
 #include "ctk/ctk_new.h"
 #include "vtk/vtk_new.h"
 
@@ -48,21 +52,23 @@ static void mouse_button_callback(GLFWwindow* glfw_win, s32 button, s32 action, 
     window->mouse_button_down[button] = action == GLFW_PRESS || action == GLFW_REPEAT;
 }
 
-static void init_window(struct window *window) {
+static struct window *create_window() {
+    struct window *win = ctk_zalloc<struct window>();
     glfwSetErrorCallback(error_callback);
     if (glfwInit() != GLFW_TRUE)
         CTK_FATAL("failed to init glfw")
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-    window->width = 1600;
-    window->height = 900;
-    window->handle = glfwCreateWindow(window->width, window->height, "test", NULL, NULL);
-    if (window->handle == NULL)
-        CTK_FATAL("failed to create window")
-    glfwSetWindowPos(window->handle, 320, 60);
-    glfwSetWindowUserPointer(window->handle, window);
-    glfwSetKeyCallback(window->handle, key_callback);
-    glfwSetMouseButtonCallback(window->handle, mouse_button_callback);
+    win->width = 1600;
+    win->height = 900;
+    win->handle = glfwCreateWindow(win->width, win->height, "test", NULL, NULL);
+    if (win->handle == NULL)
+        CTK_FATAL("failed to create win")
+    glfwSetWindowPos(win->handle, 320, 60);
+    glfwSetWindowUserPointer(win->handle, win);
+    glfwSetKeyCallback(win->handle, key_callback);
+    glfwSetMouseButtonCallback(win->handle, mouse_button_callback);
+    return win;
 }
 
 ////////////////////////////////////////////////////////////
@@ -102,7 +108,9 @@ static void create_buffers(struct vk_core *vk) {
     vk->buffers.device = vtk_create_buffer(&vk->device, &device_buf_info);
 }
 
-static void init_vk_core(struct vk_core *vk, struct window *window) {
+static struct vk_core *create_vk_core(struct window *window) {
+    struct vk_core *vk = ctk_zalloc<vk_core>();
+
     vk->instance = vtk_create_instance();
     vtk_validate_result(glfwCreateWindowSurface(vk->instance.handle, window->handle, NULL, &vk->surface), "failed to create glfw surface");
 
@@ -121,6 +129,8 @@ static void init_vk_core(struct vk_core *vk, struct window *window) {
 
     create_buffers(vk);
     vk->staging_region = vtk_allocate_region(&vk->buffers.host, 64 * CTK_MEGABYTE);
+
+    return vk;
 }
 
 ////////////////////////////////////////////////////////////
@@ -158,12 +168,14 @@ struct model_mtxs {
 };
 
 static u32 const MAX_ENTITIES = 1024;
+static u32 const MAX_LIGHTS = 16;
 static u32 const SHADOW_MAP_SIZE = 1024;
 
 struct app {
     struct vtk_vertex_layout vertex_layout;
     struct {
         struct vtk_uniform_buffer entity_model_mtxs;
+        struct vtk_uniform_buffer light_space_mtxs;
     } uniform_bufs;
     struct {
         struct vtk_image depth;
@@ -698,8 +710,8 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.entity_model_mtxs);
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
-        ctk_push(&info.viewports, { 0, 0, (f32)vk->swapchain.extent.width, (f32)vk->swapchain.extent.height, 0, 1 });
-        ctk_push(&info.scissors, { 0, 0, vk->swapchain.extent.width, vk->swapchain.extent.height });
+        ctk_push(&info.viewports, { 0, 0, (f32)SHADOW_MAP_SIZE, (f32)SHADOW_MAP_SIZE, 0, 1 });
+        ctk_push(&info.scissors, { 0, 0, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE });
         ctk_push(&info.color_blend_attachment_states, vtk_default_color_blend_attachment_state());
         info.depth_stencil_state.depthTestEnable = VK_TRUE;
         info.depth_stencil_state.depthWriteEnable = VK_TRUE;
@@ -750,7 +762,9 @@ static void init_frame_sync(struct app *app, struct vk_core *vk) {
         app->frame_sync.img_prev_frame[i] = CTK_U32_MAX;
 }
 
-static void init_app(struct app *app, struct vk_core *vk) {
+static struct app *create_app(struct vk_core *vk) {
+    struct app *app = ctk_zalloc<struct app>();
+
     // Vertex Layout
     vtk_push_vertex_attribute(&app->vertex_layout, "position", 3);
     vtk_push_vertex_attribute(&app->vertex_layout, "normal", 3);
@@ -758,6 +772,7 @@ static void init_app(struct app *app, struct vk_core *vk) {
 
     // Uniform Buffers
     app->uniform_bufs.entity_model_mtxs = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_ENTITIES, sizeof(struct model_mtxs), vk->swapchain.image_count);
+    app->uniform_bufs.light_space_mtxs = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_LIGHTS, sizeof(glm::mat4), vk->swapchain.image_count);
 
     // Attachment Images
     struct vtk_image_info depth_image_info = vtk_default_image_info();
@@ -793,6 +808,8 @@ static void init_app(struct app *app, struct vk_core *vk) {
     create_render_passes(app, vk);
     create_graphics_pipelines(app, vk);
     init_frame_sync(app, vk);
+
+    return app;
 }
 
 ////////////////////////////////////////////////////////////
@@ -819,6 +836,10 @@ struct entity {
     struct vtk_descriptor_set *texture_desc_set;
 };
 
+struct light {
+    struct transform *transform;
+};
+
 struct scene {
     struct camera camera;
     struct ctk_array<struct entity, MAX_ENTITIES> entities;
@@ -826,6 +847,11 @@ struct scene {
         struct ctk_array<struct transform, MAX_ENTITIES> transforms;
         struct ctk_array<struct model_mtxs, MAX_ENTITIES> model_mtxs;
     } entity;
+    struct {
+        struct ctk_array<struct transform, MAX_LIGHTS> transforms;
+        struct ctk_array<glm::mat4, MAX_LIGHTS> space_mtxs;
+        u32 count;
+    } light;
 };
 
 static struct transform DEFAULT_TRANSFORM = { {}, {}, { 1, 1, 1 } };
@@ -837,12 +863,22 @@ static struct entity *push_entity(struct scene *scene) {
     return entity;
 }
 
-static void init_scene(struct scene *scene, struct app *app, struct vk_core *vk) {
+static struct transform *push_light(struct scene *scene) {
+    if (scene->light.count == MAX_LIGHTS)
+        CTK_FATAL("cannot push more lights to scene (max: %u)", MAX_LIGHTS)
+    scene->light.count++;
+    ctk_push(&scene->light.space_mtxs, glm::mat4(1));
+    return ctk_push(&scene->light.transforms, DEFAULT_TRANSFORM);
+}
+
+static struct scene *create_scene(struct app *app, struct vk_core *vk) {
+    struct scene *scene = ctk_zalloc<struct scene>();
+
     scene->camera.transform = DEFAULT_TRANSFORM;
     scene->camera.transform.position = { 0, -1, -1 };
     scene->camera.fov = 90.0f;
     scene->camera.aspect = vk->swapchain.extent.width / (f32)vk->swapchain.extent.height;
-    scene->camera.z_near = 0.01f;
+    scene->camera.z_near = 0.1f;
     scene->camera.z_far = 100.0f;
 
     struct entity *cube = push_entity(scene);
@@ -855,6 +891,12 @@ static void init_scene(struct scene *scene, struct app *app, struct vk_core *vk)
     floor->transform->scale = { 32, 32, 1 };
     floor->mesh = ctk_at(&app->assets.meshes, "quad");
     floor->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "wood");
+
+    struct transform *light_trans = push_light(scene);
+    light_trans->position.x = 1;
+    light_trans->rotation.x = -45.0f;
+
+    return scene;
 }
 
 static glm::mat4 calculate_camera_mtx(struct camera* cam) {
@@ -895,196 +937,289 @@ static void update_model_mtxs(glm::mat4 view_space_mtx, u32 model_count, struct 
     }
 }
 
-static void record_render_passes(struct app *app, struct vk_core *vk, struct scene *scene, u32 swapchain_img_idx) {
-    VkCommandBufferBeginInfo cmd_buf_begin_info = {};
-    cmd_buf_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    cmd_buf_begin_info.flags = 0;
-    cmd_buf_begin_info.pInheritanceInfo = NULL;
+static void update_light_space_mtxs(u32 light_count, struct transform *light_transforms, glm::mat4 *light_space_mtxs) {
+    if (light_count == 0)
+        return;
 
-    VkCommandBuffer cmd_buf = app->cmd_bufs.render[swapchain_img_idx];
-    vtk_validate_result(vkBeginCommandBuffer(cmd_buf, &cmd_buf_begin_info), "failed to begin recording command buffer");
-#if 1
-        // Shadow
-        {
-            struct vtk_render_pass *rp = &app->render_passes.shadow;
+    for (u32 i = 0; i < light_count; ++i) {
+        glm::mat4 *light_space_mtx = light_space_mtxs + i;
+        struct transform *trans = light_transforms + i;
 
-            VkRect2D render_area = {};
-            render_area.offset.x = 0;
-            render_area.offset.y = 0;
-            render_area.extent.width = SHADOW_MAP_SIZE;
-            render_area.extent.height = SHADOW_MAP_SIZE;
+        // View Matrix
+        glm::vec3 light_pos = { trans->position.x, trans->position.y, trans->position.z };
+        glm::mat4 light_mtx(1.0f);
+        light_mtx = glm::rotate(light_mtx, glm::radians(trans->rotation.x), { 1.0f, 0.0f, 0.0f });
+        light_mtx = glm::rotate(light_mtx, glm::radians(trans->rotation.y), { 0.0f, 1.0f, 0.0f });
+        light_mtx = glm::rotate(light_mtx, glm::radians(trans->rotation.z), { 0.0f, 0.0f, 1.0f });
+        light_mtx = glm::translate(light_mtx, light_pos);
+        glm::vec3 light_forward = { light_mtx[0][2], light_mtx[1][2], light_mtx[2][2] };
+        glm::mat4 view_mtx = glm::lookAt(light_pos, light_pos + light_forward, { 0.0f, -1.0f, 0.0f });
 
-            VkRenderPassBeginInfo rp_begin_info = {};
-            rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            rp_begin_info.renderPass = rp->handle;
-            rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
-            rp_begin_info.renderArea = render_area;
-            rp_begin_info.clearValueCount = rp->clear_values.count;
-            rp_begin_info.pClearValues = rp->clear_values.data;
+        // Projection Matrix
+        f32 near_plane = 1.0f;
+        f32 far_plane = 7.5f;
+        glm::mat4 proj_mtx = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
+        // proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
 
-            vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-                struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.shadow;
-                struct vtk_descriptor_set *desc_sets[] = { &app->descriptor.sets.entity_model_mtxs };
-                for (u32 i = 0; i < scene->entities.count; ++i) {
-                    struct entity *e = scene->entities + i;
-                    struct mesh *mesh = e->mesh;
-                    vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
-                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, desc_sets, CTK_ARRAY_COUNT(desc_sets), 0, swapchain_img_idx, i);
-                    vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
-                    vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
-                    vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
-                }
-            vkCmdEndRenderPass(cmd_buf);
-        }
-#endif
-#if 1
-        // Fullscreen Texture
-        {
-            struct vtk_render_pass *rp = &app->render_passes.fullscreen_texture;
-
-            VkRect2D render_area = {};
-            render_area.offset.x = 0;
-            render_area.offset.y = 0;
-            render_area.extent = vk->swapchain.extent;
-
-            VkRenderPassBeginInfo rp_begin_info = {};
-            rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            rp_begin_info.renderPass = rp->handle;
-            rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
-            rp_begin_info.renderArea = render_area;
-            rp_begin_info.clearValueCount = rp->clear_values.count;
-            rp_begin_info.pClearValues = rp->clear_values.data;
-
-            vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-                struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.fullscreen_texture;
-                struct mesh *fullscreen_quad = ctk_at(&app->assets.meshes, "fullscreen_quad");
-                VkDescriptorSet desc_sets[] = { app->descriptor.sets.shadow_maps[0].instances[0] };
-                vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
-                vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->layout, 0, CTK_ARRAY_COUNT(desc_sets), desc_sets, 0, NULL);
-                vkCmdBindVertexBuffers(cmd_buf, 0, 1, &fullscreen_quad->vertex_region.buffer->handle, &fullscreen_quad->vertex_region.offset);
-                vkCmdBindIndexBuffer(cmd_buf, fullscreen_quad->index_region.buffer->handle, fullscreen_quad->index_region.offset, VK_INDEX_TYPE_UINT32);
-                vkCmdDrawIndexed(cmd_buf, fullscreen_quad->indexes.count, 1, 0, 0, 0);
-            vkCmdEndRenderPass(cmd_buf);
-        }
-#endif
-#if 0
-        // Main
-        {
-            struct vtk_render_pass *rp = &app->render_passes.main;
-
-            VkRect2D render_area = {};
-            render_area.offset.x = 0;
-            render_area.offset.y = 0;
-            render_area.extent = vk->swapchain.extent;
-
-            VkRenderPassBeginInfo rp_begin_info = {};
-            rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            rp_begin_info.renderPass = rp->handle;
-            rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
-            rp_begin_info.renderArea = render_area;
-            rp_begin_info.clearValueCount = rp->clear_values.count;
-            rp_begin_info.pClearValues = rp->clear_values.data;
-
-            vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-                struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.main;
-                struct vtk_descriptor_set *desc_sets[] = { &app->descriptor.sets.entity_model_mtxs };
-                for (u32 i = 0; i < scene->entities.count; ++i) {
-                    struct entity *e = scene->entities + i;
-                    struct vtk_descriptor_set *tex_desc_sets[] = { e->texture_desc_set };
-                    vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
-                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, desc_sets, CTK_ARRAY_COUNT(desc_sets), 0, swapchain_img_idx, i);
-                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, tex_desc_sets, CTK_ARRAY_COUNT(tex_desc_sets), 1, 0, 0);
-                    vkCmdBindVertexBuffers(cmd_buf, 0, 1, &e->mesh->vertex_region.buffer->handle, &e->mesh->vertex_region.offset);
-                    vkCmdBindIndexBuffer(cmd_buf, e->mesh->index_region.buffer->handle, e->mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
-                    vkCmdDrawIndexed(cmd_buf, e->mesh->indexes.count, 1, 0, 0, 0);
-                }
-            vkCmdEndRenderPass(cmd_buf);
-        }
-#endif
-    vtk_validate_result(vkEndCommandBuffer(cmd_buf), "error during render pass command recording");
+        *light_space_mtx = proj_mtx * view_mtx;
+    }
 }
 
 static void update_scene(struct scene *scene, struct vk_core *vk, struct app *app, u32 swapchain_img_idx) {
     glm::mat4 camera_mtx = calculate_camera_mtx(&scene->camera);
     update_model_mtxs(camera_mtx, scene->entities.count, scene->entity.transforms.data, scene->entity.model_mtxs.data);
-    struct vtk_region *region = app->uniform_bufs.entity_model_mtxs.regions + swapchain_img_idx;
-    vtk_write_to_host_region(vk->device.logical, scene->entity.model_mtxs.data, ctk_byte_count(&scene->entity.model_mtxs), region, 0);
-}
-
-static void submit_command_buffers(struct app *app, struct vk_core *vk, u32 swapchain_img_idx) {
-    // Render
-    {
-        VkCommandBuffer cmd_bufs[] = {
-            app->cmd_bufs.render[swapchain_img_idx],
-        };
-        VkSemaphore wait_semaphores[] = {
-            app->frame_sync.img_aquired[app->frame_sync.curr_frame],
-        };
-        VkPipelineStageFlags wait_stages[] = {
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        };
-        VkSemaphore signal_semaphores[] = {
-            app->frame_sync.render_finished[app->frame_sync.curr_frame],
-        };
-
-        VkSubmitInfo submit_info = {};
-        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit_info.waitSemaphoreCount = CTK_ARRAY_COUNT(wait_semaphores);
-        submit_info.pWaitSemaphores = wait_semaphores;
-        submit_info.pWaitDstStageMask = wait_stages;
-        submit_info.commandBufferCount = CTK_ARRAY_COUNT(cmd_bufs);
-        submit_info.pCommandBuffers = cmd_bufs;
-        submit_info.signalSemaphoreCount = CTK_ARRAY_COUNT(signal_semaphores);
-        submit_info.pSignalSemaphores = signal_semaphores;
-        vtk_validate_result(vkQueueSubmit(vk->device.queues.graphics, 1, &submit_info, app->frame_sync.in_flight[app->frame_sync.curr_frame]),
-                            "failed to submit %u command buffer(s) to graphics queue", submit_info.commandBufferCount);
-    }
-
-    // Present
-    {
-        VkSemaphore wait_semaphores[] = {
-            app->frame_sync.render_finished[app->frame_sync.curr_frame],
-        };
-        VkSwapchainKHR swapchains[] = {
-            vk->swapchain.handle,
-        };
-        u32 swapchain_img_idxs[] = {
-            swapchain_img_idx,
-        };
-
-        VkPresentInfoKHR present_info = {};
-        present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        present_info.waitSemaphoreCount = CTK_ARRAY_COUNT(wait_semaphores);
-        present_info.pWaitSemaphores = wait_semaphores;
-        present_info.swapchainCount = CTK_ARRAY_COUNT(swapchains);
-        present_info.pSwapchains = swapchains;
-        present_info.pImageIndices = swapchain_img_idxs;
-        present_info.pResults = NULL;
-        vtk_validate_result(vkQueuePresentKHR(vk->device.queues.present, &present_info), "failed to queue image for presentation");
-    }
+    update_light_space_mtxs(scene->light.count, scene->light.transforms.data, scene->light.space_mtxs.data);
+    // update_model_mtxs(scene->light.space_mtxs[0], scene->entities.count, scene->entity.transforms.data, scene->entity.model_mtxs.data);
+    vtk_write_to_host_region(vk->device.logical, scene->entity.model_mtxs.data, ctk_byte_count(&scene->entity.model_mtxs),
+                             app->uniform_bufs.entity_model_mtxs.regions + swapchain_img_idx, 0);
+    vtk_write_to_host_region(vk->device.logical, scene->light.space_mtxs.data, ctk_byte_count(&scene->light.space_mtxs),
+                             app->uniform_bufs.light_space_mtxs.regions + swapchain_img_idx, 0);
 }
 
 ////////////////////////////////////////////////////////////
-/// Synchronization
+/// UI
 ////////////////////////////////////////////////////////////
-static u32 vtk_aquire_swapchain_image_index(struct app *app, struct vk_core *vk) {
-    u32 swapchain_img_idx = CTK_U32_MAX;
-    vtk_validate_result(vkAcquireNextImageKHR(vk->device.logical, vk->swapchain.handle, CTK_U64_MAX, app->frame_sync.img_aquired[app->frame_sync.curr_frame],
-                                              VK_NULL_HANDLE, &swapchain_img_idx),
-                        "failed to aquire next swapchain image");
-    return swapchain_img_idx;
+struct ui {
+    struct vtk_render_pass render_pass;
+    VkDescriptorPool descriptor_pool;
+    ImGuiIO *io;
+    enum {
+        MODE_ENTITY,
+        MODE_LIGHT,
+        MODE_MATERIAL,
+    };
+    enum {
+        TRANSFORM_TRANSLATE,
+        TRANSFORM_ROTATE,
+        TRANSFORM_SCALE,
+    };
+    s32 mode;
+    s32 transform_mode;
+    u32 entity_idx;
+    u32 light_idx;
+    u32 material_idx;
+};
+
+static void check_vk_result(VkResult result) {
+    vtk_validate_result(result, "imgui internal call failed");
 }
 
-static void sync_frame(struct app *app, struct vk_core *vk, u32 swapchain_img_idx) {
-    u32 *img_prev_frame = app->frame_sync.img_prev_frame + swapchain_img_idx;
-    if (*img_prev_frame != CTK_U32_MAX)
-        vkWaitForFences(vk->device.logical, 1, app->frame_sync.in_flight + *img_prev_frame, VK_TRUE, CTK_U64_MAX);
-    vkResetFences(vk->device.logical, 1, app->frame_sync.in_flight + app->frame_sync.curr_frame);
-    *img_prev_frame = app->frame_sync.curr_frame;
+static struct ui *create_ui(struct window *win, struct app *app, struct vk_core *vk) {
+    struct ui *ui = ctk_zalloc<struct ui>();
+
+    ////////////////////////////////////////////////////////////
+    /// Init
+    ////////////////////////////////////////////////////////////
+    ImGui::CreateContext();
+    ui->io = &ImGui::GetIO();
+    if (!ImGui_ImplGlfw_InitForVulkan(win->handle, true /* install callbacks so imgui can handle glfw input */))
+        CTK_FATAL("failed to init imgui glfw for vulkan")
+
+    ////////////////////////////////////////////////////////////
+    /// Render Pass
+    ////////////////////////////////////////////////////////////
+    struct vtk_render_pass_info rp_info = {};
+
+    // Attachments
+    VkAttachmentDescription *swapchain_attachment = ctk_push(&rp_info.attachment_descriptions);
+    swapchain_attachment->format = vk->swapchain.image_format;
+    swapchain_attachment->samples = VK_SAMPLE_COUNT_1_BIT;
+    swapchain_attachment->loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    swapchain_attachment->storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    swapchain_attachment->stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    swapchain_attachment->stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    swapchain_attachment->initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    swapchain_attachment->finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    ctk_push(&rp_info.clear_values, { 0, 0, 0, 1 });
+
+    // Subpasses
+    struct vtk_subpass_info *main = ctk_push(&rp_info.subpass_infos);
+    ctk_push(&main->color_attachment_refs, { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+
+    // Subpass Dependencies
+    rp_info.subpass_dependencies.count = 1;
+    rp_info.subpass_dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    rp_info.subpass_dependencies[0].dstSubpass = 0;
+    rp_info.subpass_dependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    rp_info.subpass_dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    rp_info.subpass_dependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    rp_info.subpass_dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    rp_info.subpass_dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    // Framebuffer Infos
+    for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
+        struct vtk_framebuffer_info *fb_info = ctk_push(&rp_info.framebuffer_infos);
+        ctk_push(&fb_info->attachments, vk->swapchain.image_views[i]);
+        fb_info->extent = vk->swapchain.extent;
+        fb_info->layers = 1;
+    }
+
+    ui->render_pass = vtk_create_render_pass(vk->device.logical, vk->graphics_cmd_pool, &rp_info);
+
+    ////////////////////////////////////////////////////////////
+    /// Descriptor Pool
+    ////////////////////////////////////////////////////////////
+    VkDescriptorPoolSize pool_sizes[] = {
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 16 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16 },
+        { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 16 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 },
+    };
+    VkDescriptorPoolCreateInfo pool_info = {};
+    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.flags = 0;
+    pool_info.maxSets = 64;
+    pool_info.poolSizeCount = CTK_ARRAY_COUNT(pool_sizes);
+    pool_info.pPoolSizes = pool_sizes;
+    vtk_validate_result(vkCreateDescriptorPool(vk->device.logical, &pool_info, NULL, &ui->descriptor_pool), "failed to create descriptor pool");
+
+    ////////////////////////////////////////////////////////////
+    /// Vulkan Init
+    ////////////////////////////////////////////////////////////
+    ImGui_ImplVulkan_InitInfo imgui_vk_info = {};
+    imgui_vk_info.Instance = vk->instance.handle;
+    imgui_vk_info.PhysicalDevice = vk->device.physical;
+    imgui_vk_info.Device = vk->device.logical;
+    imgui_vk_info.QueueFamily = vk->device.queue_family_indexes.graphics;
+    imgui_vk_info.Queue = vk->device.queues.graphics;
+    imgui_vk_info.PipelineCache = VK_NULL_HANDLE;
+    imgui_vk_info.DescriptorPool = ui->descriptor_pool;
+    imgui_vk_info.MinImageCount = vk->swapchain.image_count;
+    imgui_vk_info.ImageCount = vk->swapchain.image_count;
+    imgui_vk_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    imgui_vk_info.Allocator = NULL;
+    imgui_vk_info.CheckVkResultFn = check_vk_result;
+    if (!ImGui_ImplVulkan_Init(&imgui_vk_info, ui->render_pass.handle))
+        CTK_FATAL("failed to init imgui vulkan")
+
+    ////////////////////////////////////////////////////////////
+    /// Fonts
+    ////////////////////////////////////////////////////////////
+    vtk_begin_one_time_command_buffer(app->cmd_bufs.one_time);
+        ImGui_ImplVulkan_CreateFontsTexture(app->cmd_bufs.one_time);
+    vtk_submit_one_time_command_buffer(app->cmd_bufs.one_time, vk->device.queues.graphics);
+    ImGui_ImplVulkan_DestroyFontUploadObjects();
+
+    return ui;
 }
 
-static void cycle_frame(struct app *app) {
-    app->frame_sync.curr_frame = app->frame_sync.curr_frame == app->frame_sync.frame_count - 1 ? 0 : app->frame_sync.curr_frame + 1;
+static bool list_box_begin(cstr id, cstr title, u32 item_count, u32 viewable_item_count = -1) {
+    ImGui::PushItemWidth(-1);
+    char imgui_id[256] = {};
+    sprintf(imgui_id, "##%s", id);
+    if (title)
+        ImGui::Text(title);
+    return ImGui::ListBoxHeader(imgui_id, item_count, viewable_item_count);
+}
+
+static void list_box_end() {
+    ImGui::ListBoxFooter();
+    ImGui::PopItemWidth();
+}
+
+static bool window_begin(cstr title, s32 x, s32 y, s32 width, s32 height, s32 flags) {
+    ImGui::SetNextWindowPos({ (f32)x, (f32)y });
+    return ImGui::Begin(title, NULL, flags);
+}
+
+static void window_end() {
+    ImGui::End();
+}
+
+static void separator() {
+    ImVec2 output_pos = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(output_pos.x, output_pos.y + 1),
+                                        ImVec2(output_pos.x + ImGui::GetColumnWidth(), output_pos.y + 1),
+                                        IM_COL32(255, 255, 255, 64));
+    ImGui::Dummy(ImVec2(0, 2));
+}
+
+static void transform_control(struct transform *t) {
+    ImGui::Text("transform");
+    ImGui::DragFloat3("position", &t->position.x, 0.01f);
+    ImGui::DragFloat3("rotation", &t->rotation.x, 0.1f);
+    ImGui::DragFloat3("scale", &t->scale.x, 0.01f);
+}
+
+static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+
+    static cstr MODES[] = { "entities", "lights", "materials" };
+    cstr curr_mode = MODES[ui->mode];
+    s32 window_flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove/* | ImGuiWindowFlags_NoResize*/;
+    if (window_begin("states", 0, 0, 600, (s32)win->height, window_flags)) {
+        ImGui::Columns(2, NULL);
+
+        ImGui::PushItemWidth(-1);
+        if (ImGui::BeginCombo("", curr_mode)) {
+            for (u32 i = 0; i < CTK_ARRAY_COUNT(MODES); ++i) {
+                cstr mode = MODES[i];
+                bool selected = curr_mode == mode;
+                if (ImGui::Selectable(mode, selected))
+                    ui->mode = i;
+                if (selected)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::PopItemWidth();
+
+        if (ui->mode == ui::MODE_ENTITY) {
+            if (list_box_begin("0", NULL, scene->entities.count)) {
+                for (u32 i = 0; i < scene->entities.count; ++i) {
+                    cstr entity_name = scene->entities[i].name;
+                    char name[64] = {};
+                    if (entity_name != NULL)
+                        strcpy(name, entity_name);
+                    else
+                        sprintf(name, "entity %u", i);
+                    if (ImGui::Selectable(name, i == ui->entity_idx))
+                        ui->entity_idx = i;
+                }
+            }
+            list_box_end();
+        } else if (ui->mode == ui::MODE_LIGHT) {
+            if (list_box_begin("1", NULL, scene->light.count)) {
+                for (u32 i = 0; i < scene->light.count; ++i) {
+                    char name[16] = {};
+                    sprintf(name, "light %u", i);
+                    if (ImGui::Selectable(name, i == ui->light_idx))
+                        ui->light_idx = i;
+                }
+            }
+            list_box_end();
+        } else if (ui->mode == ui::MODE_MATERIAL) {
+            // if (list_box_begin("2", NULL, State->Materials.count))
+            //     for (u32 i = 0; i < State->Materials.count; ++i)
+            //         if (ImGui::Selectable(State->Materials.keys[i], i == ui->material_idx))
+            //             ui->material_idx = i;
+            // list_box_end();
+        }
+
+        ImGui::NextColumn();
+        if (ui->mode == ui::MODE_ENTITY) {
+            struct entity *entity = scene->entities + ui->entity_idx;
+            transform_control(entity->transform);
+        } else if (ui->mode == ui::MODE_LIGHT) {
+            // light *Light = scene->Lights + ui->light_idx;
+            transform_control(scene->light.transforms + ui->light_idx);
+            // separator();
+            // ImGui::SliderFloat("intensity", &Light->Intensity, 0.0f, 1.0f);
+            // ImGui::SliderFloat("ambient intensity", &Light->AmbientIntensity, 0.0f, 1.0f);
+            // s32 *attenuation_index = (s32 *)(scene->LightAttenuationIndexes + ui->light_idx);
+            // if (ImGui::SliderInt("attenuation index", attenuation_index, 0, ATTENUATION_VALUE_COUNT - 1))
+            //     set_attenuation_values(Light, *attenuation_index);
+            // separator();
+            // ImGui::Text("color");
+            // ImGui::ColorPicker4("##color", &Light->Color.X);
+        } else if (ui->mode == ui::MODE_MATERIAL) {
+            // struct material *material = State->Materials.Values + ui->material_idx;
+            // ImGui::SliderInt("shine exponent", (s32 *)&material->ShineExponent, 4, 1024);
+        }
+    }
+    window_end();
 }
 
 ////////////////////////////////////////////////////////////
@@ -1155,42 +1290,262 @@ static void camera_controls(struct transform *cam_trans, struct window *window) 
     local_translate(cam_trans, translation);
 }
 
-// ////////////////////////////////////////////////////////////
-// /// UI
-// ////////////////////////////////////////////////////////////
-// static void draw_ui() {
-//     ImGui_ImplVulkan_NewFrame();
-//     ImGui_ImplGlfw_NewFrame();
-//     ImGui::NewFrame();
-// }
+////////////////////////////////////////////////////////////
+/// Rendering
+////////////////////////////////////////////////////////////
+static u32 vtk_aquire_swapchain_image_index(struct app *app, struct vk_core *vk) {
+    u32 swapchain_img_idx = CTK_U32_MAX;
+    vtk_validate_result(vkAcquireNextImageKHR(vk->device.logical, vk->swapchain.handle, CTK_U64_MAX, app->frame_sync.img_aquired[app->frame_sync.curr_frame],
+                                              VK_NULL_HANDLE, &swapchain_img_idx),
+                        "failed to aquire next swapchain image");
+    return swapchain_img_idx;
+}
+
+static void sync_frame(struct app *app, struct vk_core *vk, u32 swapchain_img_idx) {
+    u32 *img_prev_frame = app->frame_sync.img_prev_frame + swapchain_img_idx;
+    if (*img_prev_frame != CTK_U32_MAX)
+        vkWaitForFences(vk->device.logical, 1, app->frame_sync.in_flight + *img_prev_frame, VK_TRUE, CTK_U64_MAX);
+    vkResetFences(vk->device.logical, 1, app->frame_sync.in_flight + app->frame_sync.curr_frame);
+    *img_prev_frame = app->frame_sync.curr_frame;
+}
+
+static void record_render_passes(struct app *app, struct vk_core *vk, struct scene *scene, struct ui *ui, u32 swapchain_img_idx) {
+    VkCommandBufferBeginInfo cmd_buf_begin_info = {};
+    cmd_buf_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    cmd_buf_begin_info.flags = 0;
+    cmd_buf_begin_info.pInheritanceInfo = NULL;
+
+    VkCommandBuffer cmd_buf = app->cmd_bufs.render[swapchain_img_idx];
+    vtk_validate_result(vkBeginCommandBuffer(cmd_buf, &cmd_buf_begin_info), "failed to begin recording command buffer");
+#if 1
+        // Shadow
+        {
+            struct vtk_render_pass *rp = &app->render_passes.shadow;
+
+            VkRect2D render_area = {};
+            render_area.offset.x = 0;
+            render_area.offset.y = 0;
+            render_area.extent.width = SHADOW_MAP_SIZE;
+            render_area.extent.height = SHADOW_MAP_SIZE;
+
+            VkRenderPassBeginInfo rp_begin_info = {};
+            rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            rp_begin_info.renderPass = rp->handle;
+            rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
+            rp_begin_info.renderArea = render_area;
+            rp_begin_info.clearValueCount = rp->clear_values.count;
+            rp_begin_info.pClearValues = rp->clear_values.data;
+
+            vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+                struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.shadow;
+                struct vtk_descriptor_set *desc_sets[] = { &app->descriptor.sets.entity_model_mtxs };
+                for (u32 i = 0; i < scene->entities.count; ++i) {
+                    struct entity *e = scene->entities + i;
+                    struct mesh *mesh = e->mesh;
+                    vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
+                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, desc_sets, CTK_ARRAY_COUNT(desc_sets), 0, swapchain_img_idx, i);
+                    vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
+                    vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
+                    vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
+                }
+            vkCmdEndRenderPass(cmd_buf);
+        }
+#endif
+        // VkImageMemoryBarrier img_barrier = {};
+        // img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        // img_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        // img_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        // img_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        // img_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        // img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        // img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        // img_barrier.image = tex.handle;
+        // img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        // img_barrier.subresourceRange.baseMipLevel = 0;
+        // img_barrier.subresourceRange.levelCount = 1;
+        // img_barrier.subresourceRange.baseArrayLayer = 0;
+        // img_barrier.subresourceRange.layerCount = 1;
+        // vkCmdPipelineBarrier(cmd_buf,
+        //                      VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        //                      VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+        //                      0, // Dependency Flags
+        //                      0, NULL, // Memory Barriers
+        //                      0, NULL, // Buffer Memory Barriers
+        //                      0, NULL);
+        //                      // 1, &img_barrier); // Image Memory Barriers
+#if 1
+        // Fullscreen Texture
+        {
+            struct vtk_render_pass *rp = &app->render_passes.fullscreen_texture;
+
+            VkRect2D render_area = {};
+            render_area.offset.x = 0;
+            render_area.offset.y = 0;
+            render_area.extent = vk->swapchain.extent;
+
+            VkRenderPassBeginInfo rp_begin_info = {};
+            rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            rp_begin_info.renderPass = rp->handle;
+            rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
+            rp_begin_info.renderArea = render_area;
+            rp_begin_info.clearValueCount = rp->clear_values.count;
+            rp_begin_info.pClearValues = rp->clear_values.data;
+
+            vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+                struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.fullscreen_texture;
+                struct mesh *fullscreen_quad = ctk_at(&app->assets.meshes, "fullscreen_quad");
+                VkDescriptorSet desc_sets[] = { app->descriptor.sets.shadow_maps[0].instances[0] };
+                vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
+                vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->layout, 0, CTK_ARRAY_COUNT(desc_sets), desc_sets, 0, NULL);
+                vkCmdBindVertexBuffers(cmd_buf, 0, 1, &fullscreen_quad->vertex_region.buffer->handle, &fullscreen_quad->vertex_region.offset);
+                vkCmdBindIndexBuffer(cmd_buf, fullscreen_quad->index_region.buffer->handle, fullscreen_quad->index_region.offset, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(cmd_buf, fullscreen_quad->indexes.count, 1, 0, 0, 0);
+            vkCmdEndRenderPass(cmd_buf);
+        }
+#endif
+#if 0
+        // Main
+        {
+            struct vtk_render_pass *rp = &app->render_passes.main;
+
+            VkRect2D render_area = {};
+            render_area.offset.x = 0;
+            render_area.offset.y = 0;
+            render_area.extent = vk->swapchain.extent;
+
+            VkRenderPassBeginInfo rp_begin_info = {};
+            rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            rp_begin_info.renderPass = rp->handle;
+            rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
+            rp_begin_info.renderArea = render_area;
+            rp_begin_info.clearValueCount = rp->clear_values.count;
+            rp_begin_info.pClearValues = rp->clear_values.data;
+
+            vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+                struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.main;
+                struct vtk_descriptor_set *desc_sets[] = { &app->descriptor.sets.entity_model_mtxs };
+                for (u32 i = 0; i < scene->entities.count; ++i) {
+                    struct entity *e = scene->entities + i;
+                    struct vtk_descriptor_set *tex_desc_sets[] = { e->texture_desc_set };
+                    vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
+                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, desc_sets, CTK_ARRAY_COUNT(desc_sets), 0, swapchain_img_idx, i);
+                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, tex_desc_sets, CTK_ARRAY_COUNT(tex_desc_sets), 1, 0, 0);
+                    vkCmdBindVertexBuffers(cmd_buf, 0, 1, &e->mesh->vertex_region.buffer->handle, &e->mesh->vertex_region.offset);
+                    vkCmdBindIndexBuffer(cmd_buf, e->mesh->index_region.buffer->handle, e->mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
+                    vkCmdDrawIndexed(cmd_buf, e->mesh->indexes.count, 1, 0, 0, 0);
+                }
+            vkCmdEndRenderPass(cmd_buf);
+        }
+#endif
+#if 1
+        // UI
+        {
+            struct vtk_render_pass* render_pass = &ui->render_pass;
+            ImGui::Render();
+
+            VkRect2D render_area = {};
+            render_area.offset.x = 0;
+            render_area.offset.y = 0;
+            render_area.extent = vk->swapchain.extent;
+
+            VkRenderPassBeginInfo rp_begin_info = {};
+            rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            rp_begin_info.renderPass = render_pass->handle;
+            rp_begin_info.framebuffer = render_pass->framebuffers[swapchain_img_idx];
+            rp_begin_info.renderArea = render_area;
+            rp_begin_info.clearValueCount = render_pass->clear_values.count;
+            rp_begin_info.pClearValues = render_pass->clear_values.data;
+
+            vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+                ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd_buf);
+            vkCmdEndRenderPass(cmd_buf);
+        }
+#endif
+    vtk_validate_result(vkEndCommandBuffer(cmd_buf), "error during render pass command recording");
+}
+
+static void submit_command_buffers(struct app *app, struct vk_core *vk, u32 swapchain_img_idx) {
+    // Render
+    {
+        VkCommandBuffer cmd_bufs[] = {
+            app->cmd_bufs.render[swapchain_img_idx],
+        };
+        VkSemaphore wait_semaphores[] = {
+            app->frame_sync.img_aquired[app->frame_sync.curr_frame],
+        };
+        VkPipelineStageFlags wait_stages[] = {
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        };
+        VkSemaphore signal_semaphores[] = {
+            app->frame_sync.render_finished[app->frame_sync.curr_frame],
+        };
+
+        VkSubmitInfo submit_info = {};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.waitSemaphoreCount = CTK_ARRAY_COUNT(wait_semaphores);
+        submit_info.pWaitSemaphores = wait_semaphores;
+        submit_info.pWaitDstStageMask = wait_stages;
+        submit_info.commandBufferCount = CTK_ARRAY_COUNT(cmd_bufs);
+        submit_info.pCommandBuffers = cmd_bufs;
+        submit_info.signalSemaphoreCount = CTK_ARRAY_COUNT(signal_semaphores);
+        submit_info.pSignalSemaphores = signal_semaphores;
+        vtk_validate_result(vkQueueSubmit(vk->device.queues.graphics, 1, &submit_info, app->frame_sync.in_flight[app->frame_sync.curr_frame]),
+                            "failed to submit %u command buffer(s) to graphics queue", submit_info.commandBufferCount);
+    }
+
+    // Present
+    {
+        VkSemaphore wait_semaphores[] = {
+            app->frame_sync.render_finished[app->frame_sync.curr_frame],
+        };
+        VkSwapchainKHR swapchains[] = {
+            vk->swapchain.handle,
+        };
+        u32 swapchain_img_idxs[] = {
+            swapchain_img_idx,
+        };
+
+        VkPresentInfoKHR present_info = {};
+        present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        present_info.waitSemaphoreCount = CTK_ARRAY_COUNT(wait_semaphores);
+        present_info.pWaitSemaphores = wait_semaphores;
+        present_info.swapchainCount = CTK_ARRAY_COUNT(swapchains);
+        present_info.pSwapchains = swapchains;
+        present_info.pImageIndices = swapchain_img_idxs;
+        present_info.pResults = NULL;
+        vtk_validate_result(vkQueuePresentKHR(vk->device.queues.present, &present_info), "failed to queue image for presentation");
+    }
+}
+
+static void cycle_frame(struct app *app) {
+    app->frame_sync.curr_frame = app->frame_sync.curr_frame == app->frame_sync.frame_count - 1 ? 0 : app->frame_sync.curr_frame + 1;
+}
 
 ////////////////////////////////////////////////////////////
 /// Main
 ////////////////////////////////////////////////////////////
 void test_main() {
-    struct window window = {};
-    struct vk_core vk = {};
-    struct app app = {};
-    struct scene *scene = ctk_zalloc<struct scene>();
-    init_window(&window);
-    init_vk_core(&vk, &window);
-    init_app(&app, &vk);
-    init_scene(scene, &app, &vk);
-    while (!glfwWindowShouldClose(window.handle)) {
+    struct window *win = create_window();
+    struct vk_core *vk = create_vk_core(win);
+    struct app *app = create_app(vk);
+    struct scene *scene = create_scene(app, vk);
+    struct ui *ui = create_ui(win, app, vk);
+    while (!glfwWindowShouldClose(win->handle)) {
         // Input
         glfwPollEvents();
-        if (window.key_down[GLFW_KEY_ESCAPE])
+        if (win->key_down[GLFW_KEY_ESCAPE])
             break;
-        update_mouse_state(&window);
-        camera_controls(&scene->camera.transform, &window);
+        update_mouse_state(win);
+        camera_controls(&scene->camera.transform, win);
 
         // Rendering
-        u32 swapchain_img_idx = vtk_aquire_swapchain_image_index(&app, &vk);
-        sync_frame(&app, &vk, swapchain_img_idx);
-        record_render_passes(&app, &vk, scene, swapchain_img_idx);
-        update_scene(scene, &vk, &app, swapchain_img_idx);
-        submit_command_buffers(&app, &vk, swapchain_img_idx);
-        cycle_frame(&app);
+        u32 swapchain_img_idx = vtk_aquire_swapchain_image_index(app, vk);
+        sync_frame(app, vk, swapchain_img_idx);
+        draw_ui(ui, scene, win);
+        update_scene(scene, vk, app, swapchain_img_idx);
+        record_render_passes(app, vk, scene, ui, swapchain_img_idx);
+        submit_command_buffers(app, vk, swapchain_img_idx);
+        cycle_frame(app);
 
         Sleep(1);
     }

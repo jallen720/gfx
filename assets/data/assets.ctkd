@@ -140,7 +140,7 @@ models {
     centered_cube { path assets/models/centered_cube.obj }
     quad { path assets/models/quad.obj }
     sibenik { path assets/models/sibenik/sibenik.obj }
-    fullscreen_plane { path assets/models/fullscreen_plane.obj }
+    fullscreen_quad { path assets/models/fullscreen_quad.obj }
     light_diamond { path assets/models/light_diamond.obj }
     direction_pyramid { path assets/models/direction_pyramid.obj }
 }

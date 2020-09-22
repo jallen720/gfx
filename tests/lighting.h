@@ -1116,7 +1116,7 @@ static void record_main_render_pass(vulkan_instance *VulkanInstance, assets *Ass
         // Lighting Stage
         {
             vtk::graphics_pipeline *LightingGP = &State->GraphicsPipelines.Lighting;
-            mesh *FullscreenPlane = ctk::at(&Assets->Meshes, "fullscreen_plane");
+            mesh *fullscreen_quad = ctk::at(&Assets->Meshes, "fullscreen_quad");
             VkDescriptorSet DescriptorSets[] = {
                 State->DescriptorSets.InputAttachments.Instances[0],
                 State->DescriptorSets.ShadowMaps.Instances[0],
@@ -1133,11 +1133,11 @@ static void record_main_render_pass(vulkan_instance *VulkanInstance, assets *Ass
                                     0, NULL);
             vkCmdPushConstants(CommandBuffer, LightingGP->Layout, VK_SHADER_STAGE_FRAGMENT_BIT,
                                0, sizeof(lighting_push_constants), &State->PushConstants.Lighting);
-            vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &FullscreenPlane->VertexRegion.Buffer->Handle,
-                                   &FullscreenPlane->VertexRegion.Offset);
-            vkCmdBindIndexBuffer(CommandBuffer, FullscreenPlane->IndexRegion.Buffer->Handle, FullscreenPlane->IndexRegion.Offset,
+            vkCmdBindVertexBuffers(CommandBuffer, 0, 1, &fullscreen_quad->VertexRegion.Buffer->Handle,
+                                   &fullscreen_quad->VertexRegion.Offset);
+            vkCmdBindIndexBuffer(CommandBuffer, fullscreen_quad->IndexRegion.Buffer->Handle, fullscreen_quad->IndexRegion.Offset,
                                  VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(CommandBuffer, FullscreenPlane->Indexes.Count, 1, 0, 0, 0);
+            vkCmdDrawIndexed(CommandBuffer, fullscreen_quad->Indexes.Count, 1, 0, 0, 0);
         }
 
         vkCmdNextSubpass(CommandBuffer, VK_SUBPASS_CONTENTS_INLINE);
