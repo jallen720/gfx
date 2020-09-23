@@ -162,9 +162,14 @@ struct mesh {
     struct vtk_region index_region;
 };
 
-struct model_mtxs {
-    glm::mat4 model;
-    glm::mat4 mvp;
+struct model_ubo {
+    glm::mat4 model_mtx;
+    glm::mat4 mvp_mtx;
+};
+
+struct light_ubo {
+    glm::mat4 space_mtx;
+    struct ctk_v3 position;
 };
 
 static u32 const MAX_ENTITIES = 1024;
@@ -174,8 +179,8 @@ static u32 const SHADOW_MAP_SIZE = 1024;
 struct app {
     struct vtk_vertex_layout vertex_layout;
     struct {
-        struct vtk_uniform_buffer entity_model_mtxs;
-        struct vtk_uniform_buffer light_space_mtxs;
+        struct vtk_uniform_buffer model_ubos;
+        struct vtk_uniform_buffer light_ubos;
     } uniform_bufs;
     struct {
         struct vtk_image depth;
@@ -193,11 +198,11 @@ struct app {
     struct {
         VkDescriptorPool pool;
         struct {
-            VkDescriptorSetLayout entity_model_mtxs;
+            VkDescriptorSetLayout model_ubo;
             VkDescriptorSetLayout texture;
         } set_layouts;
         struct {
-            struct vtk_descriptor_set entity_model_mtxs;
+            struct vtk_descriptor_set entity_model_ubo;
             struct ctk_map<struct vtk_descriptor_set, 16> textures;
             struct ctk_array<struct vtk_descriptor_set, 16> shadow_maps;
         } sets;
@@ -429,14 +434,14 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
 
     // Layouts
 
-    // entity_model_mtxs
+    // model_ubo
     {
         VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT };
         VkDescriptorSetLayoutCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
         info.pBindings = &binding;
-        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptor.set_layouts.entity_model_mtxs), "error creating descriptor set layout");
+        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptor.set_layouts.model_ubo), "error creating descriptor set layout");
     }
 
     // texture
@@ -451,10 +456,9 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
 
     // Sets
 
-    // entity_model_mtxs
-    vtk_allocate_descriptor_set(&app->descriptor.sets.entity_model_mtxs, app->descriptor.set_layouts.entity_model_mtxs, vk->swapchain.image_count,
-                                vk->device.logical, app->descriptor.pool);
-    ctk_push(&app->descriptor.sets.entity_model_mtxs.dynamic_offsets, app->uniform_bufs.entity_model_mtxs.element_size);
+    // model_ubo
+    vtk_allocate_descriptor_set(&app->descriptor.sets.entity_model_ubo, app->descriptor.set_layouts.model_ubo, vk->swapchain.image_count, vk->device.logical, app->descriptor.pool);
+    ctk_push(&app->descriptor.sets.entity_model_ubo.dynamic_offsets, app->uniform_bufs.model_ubos.element_size);
 
     // textures
     for (u32 i = 0; i < app->assets.textures.count; ++i) {
@@ -487,9 +491,9 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
     struct ctk_array<VkDescriptorImageInfo, 32> img_infos = {};
     struct ctk_array<VkWriteDescriptorSet, 32> writes = {};
 
-    // entity_model_mtxs
-    for (u32 i = 0; i < app->uniform_bufs.entity_model_mtxs.regions.count; ++i) {
-        struct vtk_region *region = app->uniform_bufs.entity_model_mtxs.regions + i;
+    // model_ubo
+    for (u32 i = 0; i < app->uniform_bufs.model_ubos.regions.count; ++i) {
+        struct vtk_region *region = app->uniform_bufs.model_ubos.regions + i;
         VkDescriptorBufferInfo *info = ctk_push(&buf_infos);
         info->buffer = region->buffer->handle;
         info->offset = region->offset;
@@ -497,7 +501,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
 
         VkWriteDescriptorSet *write = ctk_push(&writes);
         write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write->dstSet = app->descriptor.sets.entity_model_mtxs.instances[i];
+        write->dstSet = app->descriptor.sets.entity_model_ubo.instances[i];
         write->dstBinding = 0;
         write->dstArrayElement = 0;
         write->descriptorCount = 1;
@@ -688,7 +692,7 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "main_vert"));
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "main_frag"));
-        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.entity_model_mtxs);
+        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.model_ubo);
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.texture);
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_inputs, { 0, 1, ctk_at(&app->vertex_layout.attributes, "uv") });
@@ -707,7 +711,7 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "shadow_vert"));
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "shadow_frag"));
-        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.entity_model_mtxs);
+        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.model_ubo);
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
         ctk_push(&info.viewports, { 0, 0, (f32)SHADOW_MAP_SIZE, (f32)SHADOW_MAP_SIZE, 0, 1 });
@@ -771,8 +775,8 @@ static struct app *create_app(struct vk_core *vk) {
     vtk_push_vertex_attribute(&app->vertex_layout, "uv", 2);
 
     // Uniform Buffers
-    app->uniform_bufs.entity_model_mtxs = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_ENTITIES, sizeof(struct model_mtxs), vk->swapchain.image_count);
-    app->uniform_bufs.light_space_mtxs = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_LIGHTS, sizeof(glm::mat4), vk->swapchain.image_count);
+    app->uniform_bufs.model_ubos = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_ENTITIES, sizeof(struct model_ubo), vk->swapchain.image_count);
+    app->uniform_bufs.light_ubos = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_LIGHTS, sizeof(struct light_ubo), vk->swapchain.image_count);
 
     // Attachment Images
     struct vtk_image_info depth_image_info = vtk_default_image_info();
@@ -836,20 +840,16 @@ struct entity {
     struct vtk_descriptor_set *texture_desc_set;
 };
 
-struct light {
-    struct transform *transform;
-};
-
 struct scene {
     struct camera camera;
     struct ctk_array<struct entity, MAX_ENTITIES> entities;
     struct {
         struct ctk_array<struct transform, MAX_ENTITIES> transforms;
-        struct ctk_array<struct model_mtxs, MAX_ENTITIES> model_mtxs;
+        struct ctk_array<struct model_ubo, MAX_ENTITIES> model_ubos;
     } entity;
     struct {
         struct ctk_array<struct transform, MAX_LIGHTS> transforms;
-        struct ctk_array<glm::mat4, MAX_LIGHTS> space_mtxs;
+        struct ctk_array<struct light_ubo, MAX_LIGHTS> ubos;
         u32 count;
     } light;
 };
@@ -857,17 +857,19 @@ struct scene {
 static struct transform DEFAULT_TRANSFORM = { {}, {}, { 1, 1, 1 } };
 
 static struct entity *push_entity(struct scene *scene) {
-    ctk_push(&scene->entity.model_mtxs);
+    if (scene->entities.count == MAX_ENTITIES)
+        CTK_FATAL("cannot push more entities to scene (max: %u)", MAX_ENTITIES)
+    ctk_push(&scene->entity.model_ubos);
     struct entity *entity = ctk_push(&scene->entities);
     entity->transform = ctk_push(&scene->entity.transforms, DEFAULT_TRANSFORM);
     return entity;
 }
 
 static struct transform *push_light(struct scene *scene) {
-    if (scene->light.count == MAX_LIGHTS)
+    if (scene->light.ubos.count == MAX_LIGHTS)
         CTK_FATAL("cannot push more lights to scene (max: %u)", MAX_LIGHTS)
     scene->light.count++;
-    ctk_push(&scene->light.space_mtxs, glm::mat4(1));
+    ctk_push(&scene->light.ubos);
     return ctk_push(&scene->light.transforms, DEFAULT_TRANSFORM);
 }
 
@@ -893,13 +895,45 @@ static struct scene *create_scene(struct app *app, struct vk_core *vk) {
     floor->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "wood");
 
     struct transform *light_trans = push_light(scene);
-    light_trans->position.x = 1;
-    light_trans->rotation.x = -45.0f;
+    light_trans->position = { 1, -3, -3 };
+    light_trans->rotation = { 45.0f, -45.0f, 0.0f };
 
     return scene;
 }
 
-static glm::mat4 calculate_camera_mtx(struct camera* cam) {
+static void update_lights(struct scene *scene) {
+    if (scene->light.count == 0)
+        return;
+
+    for (u32 i = 0; i < scene->light.count; ++i) {
+        struct transform *trans = scene->light.transforms + i;
+        struct light_ubo *ubo = scene->light.ubos + i;
+
+        // View Matrix
+        glm::vec3 light_pos = { trans->position.x, trans->position.y, trans->position.z };
+        glm::mat4 light_mtx(1.0f);
+        light_mtx = glm::rotate(light_mtx, glm::radians(trans->rotation.x), { 1.0f, 0.0f, 0.0f });
+        light_mtx = glm::rotate(light_mtx, glm::radians(trans->rotation.y), { 0.0f, 1.0f, 0.0f });
+        light_mtx = glm::rotate(light_mtx, glm::radians(trans->rotation.z), { 0.0f, 0.0f, 1.0f });
+        light_mtx = glm::translate(light_mtx, light_pos);
+        glm::vec3 light_forward = { light_mtx[0][2], light_mtx[1][2], light_mtx[2][2] };
+        glm::mat4 view_mtx = glm::lookAt(light_pos, light_pos + light_forward, { 0.0f, -1.0f, 0.0f });
+
+        // Projection Matrix
+        f32 near_plane = 1.0f;
+        f32 far_plane = 17.5f;
+        glm::mat4 proj_mtx = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
+        proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
+
+        // glm::mat4 proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 20.0f);
+        // proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
+
+        ubo->space_mtx = proj_mtx * view_mtx;
+        ubo->position = trans->position;
+    }
+}
+
+static glm::mat4 camera_space_mtx(struct camera* cam) {
     struct transform *cam_trans = &cam->transform;
 
     // View Matrix
@@ -919,82 +953,50 @@ static glm::mat4 calculate_camera_mtx(struct camera* cam) {
     return proj_mtx * view_mtx;
 }
 
-static void update_model_mtxs(glm::mat4 view_space_mtx, u32 model_count, struct transform *transforms, struct model_mtxs *model_mtxs_array) {
-    if (model_count == 0)
+static void update_entities(struct scene *scene) {
+    if (scene->entities.count == 0)
         return;
 
-    for (u32 i = 0; i < model_count; ++i) {
-        struct transform *trans = transforms + i;
-        struct model_mtxs *model_mtxs = model_mtxs_array + i;
+    // glm::mat4 view_space_mtx = camera_space_mtx(&scene->camera);
+    glm::mat4 view_space_mtx = scene->light.ubos[0].space_mtx;
+
+    for (u32 i = 0; i < scene->entities.count; ++i) {
+        struct transform *trans = scene->entity.transforms + i;
+        struct model_ubo *model_ubo = scene->entity.model_ubos + i;
         glm::mat4 model_mtx(1.0f);
         model_mtx = glm::translate(model_mtx, { trans->position.x, trans->position.y, trans->position.z });
         model_mtx = glm::rotate(model_mtx, glm::radians(trans->rotation.x), { 1.0f, 0.0f, 0.0f });
         model_mtx = glm::rotate(model_mtx, glm::radians(trans->rotation.y), { 0.0f, 1.0f, 0.0f });
         model_mtx = glm::rotate(model_mtx, glm::radians(trans->rotation.z), { 0.0f, 0.0f, 1.0f });
         model_mtx = glm::scale(model_mtx, { trans->scale.x, trans->scale.y, trans->scale.z });
-        model_mtxs->model = model_mtx;
-        model_mtxs->mvp = view_space_mtx * model_mtx;
+
+        model_ubo->model_mtx = model_mtx;
+        model_ubo->mvp_mtx = view_space_mtx * model_mtx;
     }
 }
 
-static void update_light_space_mtxs(u32 light_count, struct transform *light_transforms, glm::mat4 *light_space_mtxs) {
-    if (light_count == 0)
-        return;
-
-    for (u32 i = 0; i < light_count; ++i) {
-        glm::mat4 *light_space_mtx = light_space_mtxs + i;
-        struct transform *trans = light_transforms + i;
-
-        // View Matrix
-        glm::vec3 light_pos = { trans->position.x, trans->position.y, trans->position.z };
-        glm::mat4 light_mtx(1.0f);
-        light_mtx = glm::rotate(light_mtx, glm::radians(trans->rotation.x), { 1.0f, 0.0f, 0.0f });
-        light_mtx = glm::rotate(light_mtx, glm::radians(trans->rotation.y), { 0.0f, 1.0f, 0.0f });
-        light_mtx = glm::rotate(light_mtx, glm::radians(trans->rotation.z), { 0.0f, 0.0f, 1.0f });
-        light_mtx = glm::translate(light_mtx, light_pos);
-        glm::vec3 light_forward = { light_mtx[0][2], light_mtx[1][2], light_mtx[2][2] };
-        glm::mat4 view_mtx = glm::lookAt(light_pos, light_pos + light_forward, { 0.0f, -1.0f, 0.0f });
-
-        // Projection Matrix
-        f32 near_plane = 1.0f;
-        f32 far_plane = 7.5f;
-        glm::mat4 proj_mtx = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
-        // proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
-
-        *light_space_mtx = proj_mtx * view_mtx;
-    }
-}
-
-static void update_scene(struct scene *scene, struct vk_core *vk, struct app *app, u32 swapchain_img_idx) {
-    glm::mat4 camera_mtx = calculate_camera_mtx(&scene->camera);
-    update_model_mtxs(camera_mtx, scene->entities.count, scene->entity.transforms.data, scene->entity.model_mtxs.data);
-    update_light_space_mtxs(scene->light.count, scene->light.transforms.data, scene->light.space_mtxs.data);
-    // update_model_mtxs(scene->light.space_mtxs[0], scene->entities.count, scene->entity.transforms.data, scene->entity.model_mtxs.data);
-    vtk_write_to_host_region(vk->device.logical, scene->entity.model_mtxs.data, ctk_byte_count(&scene->entity.model_mtxs),
-                             app->uniform_bufs.entity_model_mtxs.regions + swapchain_img_idx, 0);
-    vtk_write_to_host_region(vk->device.logical, scene->light.space_mtxs.data, ctk_byte_count(&scene->light.space_mtxs),
-                             app->uniform_bufs.light_space_mtxs.regions + swapchain_img_idx, 0);
+static void update_scene_data(struct scene *scene, struct vk_core *vk, struct app *app, u32 swapchain_img_idx) {
+    update_lights(scene);
+    update_entities(scene);
+    vtk_write_to_host_region(vk->device.logical, scene->light.ubos.data, ctk_byte_count(&scene->light.ubos), app->uniform_bufs.light_ubos.regions + swapchain_img_idx, 0);
+    vtk_write_to_host_region(vk->device.logical, scene->entity.model_ubos.data, ctk_byte_count(&scene->entity.model_ubos),
+                             app->uniform_bufs.model_ubos.regions + swapchain_img_idx, 0);
 }
 
 ////////////////////////////////////////////////////////////
 /// UI
 ////////////////////////////////////////////////////////////
+enum {
+    UI_MODE_ENTITY,
+    UI_MODE_LIGHT,
+    UI_MODE_MATERIAL,
+};
+
 struct ui {
     struct vtk_render_pass render_pass;
     VkDescriptorPool descriptor_pool;
     ImGuiIO *io;
-    enum {
-        MODE_ENTITY,
-        MODE_LIGHT,
-        MODE_MATERIAL,
-    };
-    enum {
-        TRANSFORM_TRANSLATE,
-        TRANSFORM_ROTATE,
-        TRANSFORM_SCALE,
-    };
     s32 mode;
-    s32 transform_mode;
     u32 entity_idx;
     u32 light_idx;
     u32 material_idx;
@@ -1166,7 +1168,7 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
         }
         ImGui::PopItemWidth();
 
-        if (ui->mode == ui::MODE_ENTITY) {
+        if (ui->mode == UI_MODE_ENTITY) {
             if (list_box_begin("0", NULL, scene->entities.count)) {
                 for (u32 i = 0; i < scene->entities.count; ++i) {
                     cstr entity_name = scene->entities[i].name;
@@ -1180,7 +1182,7 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
                 }
             }
             list_box_end();
-        } else if (ui->mode == ui::MODE_LIGHT) {
+        } else if (ui->mode == UI_MODE_LIGHT) {
             if (list_box_begin("1", NULL, scene->light.count)) {
                 for (u32 i = 0; i < scene->light.count; ++i) {
                     char name[16] = {};
@@ -1190,7 +1192,7 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
                 }
             }
             list_box_end();
-        } else if (ui->mode == ui::MODE_MATERIAL) {
+        } else if (ui->mode == UI_MODE_MATERIAL) {
             // if (list_box_begin("2", NULL, State->Materials.count))
             //     for (u32 i = 0; i < State->Materials.count; ++i)
             //         if (ImGui::Selectable(State->Materials.keys[i], i == ui->material_idx))
@@ -1199,10 +1201,10 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
         }
 
         ImGui::NextColumn();
-        if (ui->mode == ui::MODE_ENTITY) {
+        if (ui->mode == UI_MODE_ENTITY) {
             struct entity *entity = scene->entities + ui->entity_idx;
             transform_control(entity->transform);
-        } else if (ui->mode == ui::MODE_LIGHT) {
+        } else if (ui->mode == UI_MODE_LIGHT) {
             // light *Light = scene->Lights + ui->light_idx;
             transform_control(scene->light.transforms + ui->light_idx);
             // separator();
@@ -1214,7 +1216,7 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
             // separator();
             // ImGui::Text("color");
             // ImGui::ColorPicker4("##color", &Light->Color.X);
-        } else if (ui->mode == ui::MODE_MATERIAL) {
+        } else if (ui->mode == UI_MODE_MATERIAL) {
             // struct material *material = State->Materials.Values + ui->material_idx;
             // ImGui::SliderInt("shine exponent", (s32 *)&material->ShineExponent, 4, 1024);
         }
@@ -1338,7 +1340,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
 
             vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
                 struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.shadow;
-                struct vtk_descriptor_set *desc_sets[] = { &app->descriptor.sets.entity_model_mtxs };
+                struct vtk_descriptor_set *desc_sets[] = { &app->descriptor.sets.entity_model_ubo };
                 for (u32 i = 0; i < scene->entities.count; ++i) {
                     struct entity *e = scene->entities + i;
                     struct mesh *mesh = e->mesh;
@@ -1373,6 +1375,12 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
         //                      0, NULL, // Buffer Memory Barriers
         //                      0, NULL);
         //                      // 1, &img_barrier); // Image Memory Barriers
+#if 1
+        // Direct
+        {
+
+        }
+#endif
 #if 1
         // Fullscreen Texture
         {
@@ -1423,7 +1431,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
 
             vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
                 struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.main;
-                struct vtk_descriptor_set *desc_sets[] = { &app->descriptor.sets.entity_model_mtxs };
+                struct vtk_descriptor_set *desc_sets[] = { &app->descriptor.sets.entity_model_ubo };
                 for (u32 i = 0; i < scene->entities.count; ++i) {
                     struct entity *e = scene->entities + i;
                     struct vtk_descriptor_set *tex_desc_sets[] = { e->texture_desc_set };
@@ -1542,7 +1550,7 @@ void test_main() {
         u32 swapchain_img_idx = vtk_aquire_swapchain_image_index(app, vk);
         sync_frame(app, vk, swapchain_img_idx);
         draw_ui(ui, scene, win);
-        update_scene(scene, vk, app, swapchain_img_idx);
+        update_scene_data(scene, vk, app, swapchain_img_idx);
         record_render_passes(app, vk, scene, ui, swapchain_img_idx);
         submit_command_buffers(app, vk, swapchain_img_idx);
         cycle_frame(app);
