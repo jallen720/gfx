@@ -210,12 +210,12 @@ struct app {
         } sets;
     } descriptor;
     struct {
-        struct vtk_render_pass main;
+        struct vtk_render_pass direct;
         struct vtk_render_pass shadow;
         struct vtk_render_pass fullscreen_texture;
     } render_passes;
     struct {
-        struct vtk_graphics_pipeline main;
+        struct vtk_graphics_pipeline direct;
         struct vtk_graphics_pipeline shadow;
         struct vtk_graphics_pipeline fullscreen_texture;
     } graphics_pipelines;
@@ -381,8 +381,8 @@ static void load_mesh(struct mesh *mesh, cstr path, struct app *app, struct vk_c
 static void load_assets(struct app *app, struct vk_core *vk) {
     // Shaders
     struct shader_load_info shader_load_infos[] = {
-        { "main_vert", "assets/shaders/shadows/main.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
-        { "main_frag", "assets/shaders/shadows/main.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
+        { "direct_vert", "assets/shaders/shadows/direct.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
+        { "direct_frag", "assets/shaders/shadows/direct.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
         { "shadow_vert", "assets/shaders/shadows/shadow.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
         { "shadow_frag", "assets/shaders/shadows/shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
         { "fullscreen_texture_vert", "assets/shaders/shadows/fullscreen_texture.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
@@ -587,7 +587,51 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
 }
 
 static void create_render_passes(struct app *app, struct vk_core *vk) {
-    // Main
+    // Shadow
+    {
+        struct vtk_render_pass_info rp_info = {};
+
+        // Attachment Descriptions
+        VkAttachmentDescription *depth_attachment = ctk_push(&rp_info.attachment_descriptions);
+        depth_attachment->format = vk->device.depth_image_format;
+        depth_attachment->samples = VK_SAMPLE_COUNT_1_BIT;
+        depth_attachment->loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depth_attachment->storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        depth_attachment->stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        depth_attachment->stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depth_attachment->initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        depth_attachment->finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        ctk_push(&rp_info.clear_values, { 1.0f, 0 });
+
+        // Subpass Infos
+        struct vtk_subpass_info *main = ctk_push(&rp_info.subpass_infos);
+        ctk_set(&main->depth_attachment_ref, { 0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
+
+        // Subpass Dependencies
+        rp_info.subpass_dependencies.count = 1;
+
+        // Synchronize depth output.
+        rp_info.subpass_dependencies[0].srcSubpass = 0;
+        rp_info.subpass_dependencies[0].dstSubpass = VK_SUBPASS_EXTERNAL;
+        rp_info.subpass_dependencies[0].srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        rp_info.subpass_dependencies[0].dstStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        rp_info.subpass_dependencies[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT ;
+        rp_info.subpass_dependencies[0].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+        rp_info.subpass_dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+        // Framebuffer Infos
+        for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
+            struct vtk_framebuffer_info *fb_info = ctk_push(&rp_info.framebuffer_infos);
+            ctk_push(&fb_info->attachments, app->shadow_maps[0].view);
+            fb_info->extent.width = SHADOW_MAP_SIZE;
+            fb_info->extent.height = SHADOW_MAP_SIZE;
+            fb_info->layers = 1;
+        }
+
+        app->render_passes.shadow = vtk_create_render_pass(vk->device.logical, vk->graphics_cmd_pool, &rp_info);
+    }
+
+    // Direct
     {
         struct vtk_render_pass_info rp_info = {};
 
@@ -638,51 +682,7 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
             fb_info->layers = 1;
         }
 
-        app->render_passes.main = vtk_create_render_pass(vk->device.logical, vk->graphics_cmd_pool, &rp_info);
-    }
-
-    // Shadow
-    {
-        struct vtk_render_pass_info rp_info = {};
-
-        // Attachment Descriptions
-        VkAttachmentDescription *depth_attachment = ctk_push(&rp_info.attachment_descriptions);
-        depth_attachment->format = vk->device.depth_image_format;
-        depth_attachment->samples = VK_SAMPLE_COUNT_1_BIT;
-        depth_attachment->loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        depth_attachment->storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        depth_attachment->stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        depth_attachment->stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        depth_attachment->initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        depth_attachment->finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        ctk_push(&rp_info.clear_values, { 1.0f, 0 });
-
-        // Subpass Infos
-        struct vtk_subpass_info *main = ctk_push(&rp_info.subpass_infos);
-        ctk_set(&main->depth_attachment_ref, { 0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
-
-        // Subpass Dependencies
-        rp_info.subpass_dependencies.count = 1;
-
-        // Synchronize depth output.
-        rp_info.subpass_dependencies[0].srcSubpass = 0;
-        rp_info.subpass_dependencies[0].dstSubpass = VK_SUBPASS_EXTERNAL;
-        rp_info.subpass_dependencies[0].srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-        rp_info.subpass_dependencies[0].dstStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        rp_info.subpass_dependencies[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT ;
-        rp_info.subpass_dependencies[0].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-        rp_info.subpass_dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-
-        // Framebuffer Infos
-        for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
-            struct vtk_framebuffer_info *fb_info = ctk_push(&rp_info.framebuffer_infos);
-            ctk_push(&fb_info->attachments, app->shadow_maps[0].view);
-            fb_info->extent.width = SHADOW_MAP_SIZE;
-            fb_info->extent.height = SHADOW_MAP_SIZE;
-            fb_info->layers = 1;
-        }
-
-        app->render_passes.shadow = vtk_create_render_pass(vk->device.logical, vk->graphics_cmd_pool, &rp_info);
+        app->render_passes.direct = vtk_create_render_pass(vk->device.logical, vk->graphics_cmd_pool, &rp_info);
     }
 
     // Fullscreen Texture
@@ -721,11 +721,30 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
 }
 
 static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
-    // Main
+    // Shadow
     {
         struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
-        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "main_vert"));
-        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "main_frag"));
+        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "shadow_vert"));
+        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "shadow_frag"));
+        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.light_ubo);
+        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.model_ubo);
+        ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
+        ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
+        ctk_push(&info.viewports, { 0, 0, (f32)SHADOW_MAP_SIZE, (f32)SHADOW_MAP_SIZE, 0, 1 });
+        ctk_push(&info.scissors, { 0, 0, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE });
+        ctk_push(&info.color_blend_attachment_states, vtk_default_color_blend_attachment_state());
+        info.depth_stencil_state.depthTestEnable = VK_TRUE;
+        info.depth_stencil_state.depthWriteEnable = VK_TRUE;
+        info.depth_stencil_state.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+        app->graphics_pipelines.shadow = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.shadow, 0, &info);
+    }
+
+    // Direct
+    {
+        struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
+        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "direct_vert"));
+        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "direct_frag"));
+        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.light_ubo);
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.model_ubo);
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.texture);
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
@@ -737,25 +756,7 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         info.depth_stencil_state.depthTestEnable = VK_TRUE;
         info.depth_stencil_state.depthWriteEnable = VK_TRUE;
         info.depth_stencil_state.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-        app->graphics_pipelines.main = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.main, 0, &info);
-    }
-
-    // Shadow
-    {
-        struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
-        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "shadow_vert"));
-        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "shadow_frag"));
-        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.model_ubo);
-        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.light_ubo);
-        ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
-        ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
-        ctk_push(&info.viewports, { 0, 0, (f32)SHADOW_MAP_SIZE, (f32)SHADOW_MAP_SIZE, 0, 1 });
-        ctk_push(&info.scissors, { 0, 0, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE });
-        ctk_push(&info.color_blend_attachment_states, vtk_default_color_blend_attachment_state());
-        info.depth_stencil_state.depthTestEnable = VK_TRUE;
-        info.depth_stencil_state.depthWriteEnable = VK_TRUE;
-        info.depth_stencil_state.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-        app->graphics_pipelines.shadow = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.shadow, 0, &info);
+        app->graphics_pipelines.direct = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.direct, 0, &info);
     }
 
     // Fullscreen Texture
@@ -1376,20 +1377,16 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
 
                 // Light Descriptor Sets
-                struct vtk_descriptor_set_binding light_desc_set_binding = {};
-                light_desc_set_binding.set = &app->descriptor.sets.light_ubo;
-                ctk_push(&light_desc_set_binding.dynamic_offset_indexes, 0u);
-                vtk_bind_descriptor_sets(cmd_buf, gp->layout, &light_desc_set_binding, 1, 1, swapchain_img_idx);
+                struct vtk_descriptor_set_binding light_desc_set_binding = { &app->descriptor.sets.light_ubo, { 0u }, swapchain_img_idx };
+                vtk_bind_descriptor_sets(cmd_buf, gp->layout, 0, &light_desc_set_binding, 1);
 
                 for (u32 i = 0; i < scene->entities.count; ++i) {
                     struct entity *e = scene->entities + i;
                     struct mesh *mesh = e->mesh;
 
                     // Entity Descriptor Sets
-                    struct vtk_descriptor_set_binding entity_desc_set_binding = {};
-                    entity_desc_set_binding.set = &app->descriptor.sets.entity_model_ubo;
-                    ctk_push(&entity_desc_set_binding.dynamic_offset_indexes, i);
-                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, &entity_desc_set_binding, 1, 0, swapchain_img_idx);
+                    struct vtk_descriptor_set_binding entity_desc_set_binding = { &app->descriptor.sets.entity_model_ubo, { 0u }, swapchain_img_idx };
+                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, 1, &entity_desc_set_binding, 1);
 
                     vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
                     vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
@@ -1398,35 +1395,51 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
             vkCmdEndRenderPass(cmd_buf);
         }
 #endif
-        // VkImageMemoryBarrier img_barrier = {};
-        // img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        // img_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        // img_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        // img_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        // img_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        // img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        // img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        // img_barrier.image = tex.handle;
-        // img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        // img_barrier.subresourceRange.baseMipLevel = 0;
-        // img_barrier.subresourceRange.levelCount = 1;
-        // img_barrier.subresourceRange.baseArrayLayer = 0;
-        // img_barrier.subresourceRange.layerCount = 1;
-        // vkCmdPipelineBarrier(cmd_buf,
-        //                      VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-        //                      VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
-        //                      0, // Dependency Flags
-        //                      0, NULL, // Memory Barriers
-        //                      0, NULL, // Buffer Memory Barriers
-        //                      0, NULL);
-        //                      // 1, &img_barrier); // Image Memory Barriers
 #if 1
         // Direct
         {
+            struct vtk_render_pass *rp = &app->render_passes.direct;
 
+            VkRect2D render_area = {};
+            render_area.offset.x = 0;
+            render_area.offset.y = 0;
+            render_area.extent = vk->swapchain.extent;
+
+            VkRenderPassBeginInfo rp_begin_info = {};
+            rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            rp_begin_info.renderPass = rp->handle;
+            rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
+            rp_begin_info.renderArea = render_area;
+            rp_begin_info.clearValueCount = rp->clear_values.count;
+            rp_begin_info.pClearValues = rp->clear_values.data;
+
+            vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+                struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.direct;
+                vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
+
+                // Light Descriptor Sets
+                struct vtk_descriptor_set_binding light_desc_set_binding = { &app->descriptor.sets.light_ubo, { 0u }, swapchain_img_idx };
+                vtk_bind_descriptor_sets(cmd_buf, gp->layout, 0, &light_desc_set_binding, 1);
+
+                for (u32 i = 0; i < scene->entities.count; ++i) {
+                    struct entity *e = scene->entities + i;
+                    struct mesh *mesh = e->mesh;
+
+                    // Entity Descriptor Sets
+                    struct vtk_descriptor_set_binding entity_desc_set_bindings[2] = {
+                        { &app->descriptor.sets.entity_model_ubo, { i }, swapchain_img_idx },
+                        { e->texture_desc_set },
+                    };
+                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, 1, entity_desc_set_bindings, CTK_ARRAY_COUNT(entity_desc_set_bindings));
+
+                    vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
+                    vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
+                    vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
+                }
+            vkCmdEndRenderPass(cmd_buf);
         }
 #endif
-#if 1
+#if 0
         // Fullscreen Texture
         {
             struct vtk_render_pass *rp = &app->render_passes.fullscreen_texture;
@@ -1453,40 +1466,6 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 vkCmdBindVertexBuffers(cmd_buf, 0, 1, &fullscreen_quad->vertex_region.buffer->handle, &fullscreen_quad->vertex_region.offset);
                 vkCmdBindIndexBuffer(cmd_buf, fullscreen_quad->index_region.buffer->handle, fullscreen_quad->index_region.offset, VK_INDEX_TYPE_UINT32);
                 vkCmdDrawIndexed(cmd_buf, fullscreen_quad->indexes.count, 1, 0, 0, 0);
-            vkCmdEndRenderPass(cmd_buf);
-        }
-#endif
-#if 0
-        // Main
-        {
-            struct vtk_render_pass *rp = &app->render_passes.main;
-
-            VkRect2D render_area = {};
-            render_area.offset.x = 0;
-            render_area.offset.y = 0;
-            render_area.extent = vk->swapchain.extent;
-
-            VkRenderPassBeginInfo rp_begin_info = {};
-            rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            rp_begin_info.renderPass = rp->handle;
-            rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
-            rp_begin_info.renderArea = render_area;
-            rp_begin_info.clearValueCount = rp->clear_values.count;
-            rp_begin_info.pClearValues = rp->clear_values.data;
-
-            vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-                struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.main;
-                struct vtk_descriptor_set *desc_sets[] = { &app->descriptor.sets.entity_model_ubo };
-                for (u32 i = 0; i < scene->entities.count; ++i) {
-                    struct entity *e = scene->entities + i;
-                    struct vtk_descriptor_set *tex_desc_sets[] = { e->texture_desc_set };
-                    vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
-                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, desc_sets, CTK_ARRAY_COUNT(desc_sets), 0, swapchain_img_idx, i);
-                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, tex_desc_sets, CTK_ARRAY_COUNT(tex_desc_sets), 1, 0, 0);
-                    vkCmdBindVertexBuffers(cmd_buf, 0, 1, &e->mesh->vertex_region.buffer->handle, &e->mesh->vertex_region.offset);
-                    vkCmdBindIndexBuffer(cmd_buf, e->mesh->index_region.buffer->handle, e->mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
-                    vkCmdDrawIndexed(cmd_buf, e->mesh->indexes.count, 1, 0, 0, 0);
-                }
             vkCmdEndRenderPass(cmd_buf);
         }
 #endif
