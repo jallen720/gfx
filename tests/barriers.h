@@ -199,10 +199,12 @@ struct app {
         VkDescriptorPool pool;
         struct {
             VkDescriptorSetLayout model_ubo;
+            VkDescriptorSetLayout light_ubo;
             VkDescriptorSetLayout texture;
         } set_layouts;
         struct {
             struct vtk_descriptor_set entity_model_ubo;
+            struct vtk_descriptor_set light_ubo;
             struct ctk_map<struct vtk_descriptor_set, 16> textures;
             struct ctk_array<struct vtk_descriptor_set, 16> shadow_maps;
         } sets;
@@ -444,6 +446,16 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
         vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptor.set_layouts.model_ubo), "error creating descriptor set layout");
     }
 
+    // light_ubo
+    {
+        VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT };
+        VkDescriptorSetLayoutCreateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        info.bindingCount = 1;
+        info.pBindings = &binding;
+        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptor.set_layouts.light_ubo), "error creating descriptor set layout");
+    }
+
     // texture
     {
         VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT };
@@ -459,6 +471,10 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
     // model_ubo
     vtk_allocate_descriptor_set(&app->descriptor.sets.entity_model_ubo, app->descriptor.set_layouts.model_ubo, vk->swapchain.image_count, vk->device.logical, app->descriptor.pool);
     ctk_push(&app->descriptor.sets.entity_model_ubo.dynamic_offsets, app->uniform_bufs.model_ubos.element_size);
+
+    // light_ubo
+    vtk_allocate_descriptor_set(&app->descriptor.sets.light_ubo, app->descriptor.set_layouts.light_ubo, vk->swapchain.image_count, vk->device.logical, app->descriptor.pool);
+    ctk_push(&app->descriptor.sets.light_ubo.dynamic_offsets, app->uniform_bufs.light_ubos.element_size);
 
     // textures
     for (u32 i = 0; i < app->assets.textures.count; ++i) {
@@ -502,6 +518,24 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
         VkWriteDescriptorSet *write = ctk_push(&writes);
         write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         write->dstSet = app->descriptor.sets.entity_model_ubo.instances[i];
+        write->dstBinding = 0;
+        write->dstArrayElement = 0;
+        write->descriptorCount = 1;
+        write->descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        write->pBufferInfo = info;
+    }
+
+    // light_ubo
+    for (u32 i = 0; i < app->uniform_bufs.light_ubos.regions.count; ++i) {
+        struct vtk_region *region = app->uniform_bufs.light_ubos.regions + i;
+        VkDescriptorBufferInfo *info = ctk_push(&buf_infos);
+        info->buffer = region->buffer->handle;
+        info->offset = region->offset;
+        info->range = region->size;
+
+        VkWriteDescriptorSet *write = ctk_push(&writes);
+        write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write->dstSet = app->descriptor.sets.light_ubo.instances[i];
         write->dstBinding = 0;
         write->dstArrayElement = 0;
         write->descriptorCount = 1;
@@ -712,6 +746,7 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "shadow_vert"));
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "shadow_frag"));
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.model_ubo);
+        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.light_ubo);
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
         ctk_push(&info.viewports, { 0, 0, (f32)SHADOW_MAP_SIZE, (f32)SHADOW_MAP_SIZE, 0, 1 });
@@ -957,9 +992,7 @@ static void update_entities(struct scene *scene) {
     if (scene->entities.count == 0)
         return;
 
-    // glm::mat4 view_space_mtx = camera_space_mtx(&scene->camera);
-    glm::mat4 view_space_mtx = scene->light.ubos[0].space_mtx;
-
+    glm::mat4 view_space_mtx = camera_space_mtx(&scene->camera);
     for (u32 i = 0; i < scene->entities.count; ++i) {
         struct transform *trans = scene->entity.transforms + i;
         struct model_ubo *model_ubo = scene->entity.model_ubos + i;
@@ -1340,12 +1373,24 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
 
             vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
                 struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.shadow;
-                struct vtk_descriptor_set *desc_sets[] = { &app->descriptor.sets.entity_model_ubo };
+                vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
+
+                // Light Descriptor Sets
+                struct vtk_descriptor_set_binding light_desc_set_binding = {};
+                light_desc_set_binding.set = &app->descriptor.sets.light_ubo;
+                ctk_push(&light_desc_set_binding.dynamic_offset_indexes, 0u);
+                vtk_bind_descriptor_sets(cmd_buf, gp->layout, &light_desc_set_binding, 1, 1, swapchain_img_idx);
+
                 for (u32 i = 0; i < scene->entities.count; ++i) {
                     struct entity *e = scene->entities + i;
                     struct mesh *mesh = e->mesh;
-                    vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
-                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, desc_sets, CTK_ARRAY_COUNT(desc_sets), 0, swapchain_img_idx, i);
+
+                    // Entity Descriptor Sets
+                    struct vtk_descriptor_set_binding entity_desc_set_binding = {};
+                    entity_desc_set_binding.set = &app->descriptor.sets.entity_model_ubo;
+                    ctk_push(&entity_desc_set_binding.dynamic_offset_indexes, i);
+                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, &entity_desc_set_binding, 1, 0, swapchain_img_idx);
+
                     vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
                     vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
                     vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
