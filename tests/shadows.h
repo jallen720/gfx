@@ -381,12 +381,12 @@ static void load_mesh(struct mesh *mesh, cstr path, struct app *app, struct vk_c
 static void load_assets(struct app *app, struct vk_core *vk) {
     // Shaders
     struct shader_load_info shader_load_infos[] = {
-        { "main_vert", "assets/shaders/barriers/main.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
-        { "main_frag", "assets/shaders/barriers/main.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
-        { "shadow_vert", "assets/shaders/barriers/shadow.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
-        { "shadow_frag", "assets/shaders/barriers/shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
-        { "fullscreen_texture_vert", "assets/shaders/barriers/fullscreen_texture.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
-        { "fullscreen_texture_frag", "assets/shaders/barriers/fullscreen_texture.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
+        { "main_vert", "assets/shaders/shadows/main.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
+        { "main_frag", "assets/shaders/shadows/main.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
+        { "shadow_vert", "assets/shaders/shadows/shadow.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
+        { "shadow_frag", "assets/shaders/shadows/shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
+        { "fullscreen_texture_vert", "assets/shaders/shadows/fullscreen_texture.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
+        { "fullscreen_texture_frag", "assets/shaders/shadows/fullscreen_texture.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
     };
     for (u32 i = 0; i < CTK_ARRAY_COUNT(shader_load_infos); ++i) {
         struct shader_load_info *shader_load_info = shader_load_infos + i;
