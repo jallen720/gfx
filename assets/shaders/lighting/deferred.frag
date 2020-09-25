@@ -13,7 +13,7 @@ layout(location = 2) out vec4 OutNormal;
 layout(location = 3) out uint OutMaterialIndex;
 
 void main() {
-    OutAlbedo = texture(AlbedoTexture, InUV * 8);
+    OutAlbedo = texture(AlbedoTexture, InUV/*  * 8 */);
     OutNormal = vec4(InNormal, 1);
     OutPosition = vec4(InPosition, 1);
     OutMaterialIndex = PushConstants.MaterialIndex;

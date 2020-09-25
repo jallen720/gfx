@@ -82,7 +82,7 @@ struct control_state {
 
 struct state {
     static const u32 MAX_MATERIALS = 16;
-    static const u32 SHADOW_MAP_SIZE = 10000;
+    static const u32 SHADOW_MAP_SIZE = 1024;
     scene Scene;
     control_state ControlState;
     struct {

@@ -97,6 +97,22 @@ float my_shadow(s_fragment frag, s_light light, vec3 light_dir) {
     return shadow_val;
 }
 
+float calc_shadow(s_fragment frag, s_light light, vec3 light_dir) {
+    vec4 light_space_frag_pos = light.view_proj_mtx * vec4(frag.position, 1);
+    vec4 shadow_frag_pos = light_space_frag_pos / light_space_frag_pos.w;
+    float shadow = 1.0;
+    float shadow_frag_depth = shadow_frag_pos.z;
+    if (shadow_frag_depth > -1.0 && shadow_frag_depth < 1.0) {
+        // Convert fragment's x/y coordinates from NDC-space: [-1..1] to uv-space: [0..1] for sampling shadow map.
+        vec2 shadow_map_coord = (shadow_frag_pos.xy * 0.5) + 0.5;
+        float shadow_map_depth = texture(shadow_map, shadow_map_coord.st).r;
+
+        if (/* shadow_frag_pos.w > 0.0 && */ shadow_frag_depth - 0.001/* bias(frag, light_dir) */ > shadow_map_depth)
+            shadow = 0.0;
+    }
+    return shadow;
+}
+
 vec3 example_blinn_phong(s_fragment frag, s_light light, s_material mat) {
     vec3 lightColor = light.color.rgb * light.intensity;
     vec3 lightPos = light.position;
@@ -123,7 +139,8 @@ vec4 my_blinn_phong(s_fragment frag, s_light light, s_material mat) {
     // Shadow
     // float shadow_val = ShadowCalculation(frag, light, light_dir);
     // float shadow_val = my_shadow(frag, light, light_dir);
-    float shadow_val = textureProj(frag, light, vec2(0.0));
+    // float shadow_val = textureProj(frag, light, vec2(0.0));
+    float shadow_val = calc_shadow(frag, light, light_dir);
     // float shadow_val = 0;
 
     // Ambient
@@ -147,7 +164,7 @@ vec4 my_blinn_phong(s_fragment frag, s_light light, s_material mat) {
     vec4 spec = light_color * spec_val * frag.albedo.a;
 
     // Final
-    return (ambient + ((1.0 - shadow_val) * (spec + diff))) * attenuation(light, distance(light.position, frag.position));
+    return (ambient + (shadow_val * (spec + diff))) * attenuation(light, distance(light.position, frag.position));
 }
 
 void main() {

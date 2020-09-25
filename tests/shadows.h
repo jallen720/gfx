@@ -655,7 +655,7 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
         swapchain_attachment->stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         swapchain_attachment->stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         swapchain_attachment->initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        swapchain_attachment->finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        swapchain_attachment->finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         ctk_push(&rp_info.clear_values, { 0, 0, 0, 1 });
 
         // Subpass Infos
@@ -693,11 +693,11 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
         VkAttachmentDescription *swapchain_attachment = ctk_push(&rp_info.attachment_descriptions);
         swapchain_attachment->format = vk->swapchain.image_format;
         swapchain_attachment->samples = VK_SAMPLE_COUNT_1_BIT;
-        swapchain_attachment->loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        swapchain_attachment->loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
         swapchain_attachment->storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         swapchain_attachment->stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         swapchain_attachment->stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        swapchain_attachment->initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        swapchain_attachment->initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         swapchain_attachment->finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         ctk_push(&rp_info.clear_values, { 0, 0, 0, 1 });
 
@@ -747,6 +747,7 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.light_ubo);
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.model_ubo);
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.texture);
+        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.texture);
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_inputs, { 0, 1, ctk_at(&app->vertex_layout.attributes, "uv") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
@@ -768,8 +769,8 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_inputs, { 0, 1, ctk_at(&app->vertex_layout.attributes, "uv") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
-        ctk_push(&info.viewports, { 0, 0, (f32)vk->swapchain.extent.width, (f32)vk->swapchain.extent.height, 0, 1 });
-        ctk_push(&info.scissors, { 0, 0, vk->swapchain.extent.width, vk->swapchain.extent.height });
+        ctk_push(&info.viewports, { 1600 - 410, 10, 400, 400, 0, 1 });
+        ctk_push(&info.scissors, { 1600 - 410, 10, 400, 400 });
         ctk_push(&info.color_blend_attachment_states, vtk_default_color_blend_attachment_state());
         app->graphics_pipelines.fullscreen_texture = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.fullscreen_texture, 0, &info);
     }
@@ -836,6 +837,8 @@ static struct app *create_app(struct vk_core *vk) {
     shadow_map_info.image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     shadow_map_info.view.format = vk->device.depth_image_format;
     shadow_map_info.view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    shadow_map_info.sampler.magFilter = VK_FILTER_NEAREST;
+    shadow_map_info.sampler.minFilter = VK_FILTER_NEAREST;
     ctk_push(&app->shadow_maps, vtk_create_texture(&shadow_map_info, &vk->device));
 
     // Command Buffers
@@ -919,16 +922,30 @@ static struct scene *create_scene(struct app *app, struct vk_core *vk) {
     scene->camera.z_near = 0.1f;
     scene->camera.z_far = 100.0f;
 
-    struct entity *cube = push_entity(scene);
-    cube->transform->position = { 1.0f, -1.0f, 1.0f };
-    cube->mesh = ctk_at(&app->assets.meshes, "cube");
-    cube->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "wood");
+    struct entity *cubes[] = {
+        push_entity(scene),
+        push_entity(scene),
+    };
+    cubes[0]->transform->position = { 1.0f, -1.0f, 1.0f };
+    cubes[0]->mesh = ctk_at(&app->assets.meshes, "cube");
+    cubes[0]->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "wood");
+
+    cubes[1]->transform->position = { 4.0f, 0.0f, 2.0f };
+    cubes[1]->mesh = ctk_at(&app->assets.meshes, "cube");
+    cubes[1]->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "wood");
 
     struct entity *floor = push_entity(scene);
     floor->transform->rotation = { -90.0f, 0.0f, 0.0f };
     floor->transform->scale = { 32, 32, 1 };
     floor->mesh = ctk_at(&app->assets.meshes, "quad");
     floor->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "wood");
+
+    struct entity *quad = push_entity(scene);
+    quad->transform->position = { 2.0f, -2.0f, 3.0f };
+    quad->transform->rotation = { -90.0f, 10.0f, 0.0f };
+    quad->transform->scale = { 4, 4, 1 };
+    quad->mesh = ctk_at(&app->assets.meshes, "quad");
+    quad->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "wood");
 
     struct transform *light_trans = push_light(scene);
     light_trans->position = { 1, -3, -3 };
@@ -958,7 +975,11 @@ static void update_lights(struct scene *scene) {
         // Projection Matrix
         f32 near_plane = 1.0f;
         f32 far_plane = 17.5f;
-        glm::mat4 proj_mtx = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
+        // glm::mat4 clip = glm::mat4( 0.5f, 0.0f, 0.0f, 0.0f,
+        //                             0.0f, 0.5f, 0.0f, 0.0f,
+        //                             0.0f, 0.0f, 1.0f, 0.0f,
+        //                             0.5f, 0.5f, 0.0f, 1.0f);
+        glm::mat4 proj_mtx = /*clip **/ glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
         proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
 
         // glm::mat4 proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 20.0f);
@@ -1385,7 +1406,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                     struct mesh *mesh = e->mesh;
 
                     // Entity Descriptor Sets
-                    struct vtk_descriptor_set_binding entity_desc_set_binding = { &app->descriptor.sets.entity_model_ubo, { 0u }, swapchain_img_idx };
+                    struct vtk_descriptor_set_binding entity_desc_set_binding = { &app->descriptor.sets.entity_model_ubo, { i }, swapchain_img_idx };
                     vtk_bind_descriptor_sets(cmd_buf, gp->layout, 1, &entity_desc_set_binding, 1);
 
                     vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
@@ -1426,9 +1447,10 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                     struct mesh *mesh = e->mesh;
 
                     // Entity Descriptor Sets
-                    struct vtk_descriptor_set_binding entity_desc_set_bindings[2] = {
+                    struct vtk_descriptor_set_binding entity_desc_set_bindings[] = {
                         { &app->descriptor.sets.entity_model_ubo, { i }, swapchain_img_idx },
                         { e->texture_desc_set },
+                        { app->descriptor.sets.shadow_maps + 0 },
                     };
                     vtk_bind_descriptor_sets(cmd_buf, gp->layout, 1, entity_desc_set_bindings, CTK_ARRAY_COUNT(entity_desc_set_bindings));
 
@@ -1439,7 +1461,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
             vkCmdEndRenderPass(cmd_buf);
         }
 #endif
-#if 0
+#if 1
         // Fullscreen Texture
         {
             struct vtk_render_pass *rp = &app->render_passes.fullscreen_texture;
