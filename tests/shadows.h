@@ -174,7 +174,7 @@ struct light_ubo {
 
 static u32 const MAX_ENTITIES = 1024;
 static u32 const MAX_LIGHTS = 16;
-static u32 const SHADOW_MAP_SIZE = 1024;
+static u32 const SHADOW_MAP_SIZE = 8192;
 
 struct app {
     struct vtk_vertex_layout vertex_layout;
@@ -749,7 +749,8 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.texture);
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.texture);
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
-        ctk_push(&info.vertex_inputs, { 0, 1, ctk_at(&app->vertex_layout.attributes, "uv") });
+        ctk_push(&info.vertex_inputs, { 0, 1, ctk_at(&app->vertex_layout.attributes, "normal") });
+        ctk_push(&info.vertex_inputs, { 0, 2, ctk_at(&app->vertex_layout.attributes, "uv") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
         ctk_push(&info.viewports, { 0, 0, (f32)vk->swapchain.extent.width, (f32)vk->swapchain.extent.height, 0, 1 });
         ctk_push(&info.scissors, { 0, 0, vk->swapchain.extent.width, vk->swapchain.extent.height });
@@ -839,6 +840,8 @@ static struct app *create_app(struct vk_core *vk) {
     shadow_map_info.view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
     shadow_map_info.sampler.magFilter = VK_FILTER_NEAREST;
     shadow_map_info.sampler.minFilter = VK_FILTER_NEAREST;
+    shadow_map_info.sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    shadow_map_info.sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
     ctk_push(&app->shadow_maps, vtk_create_texture(&shadow_map_info, &vk->device));
 
     // Command Buffers
@@ -949,7 +952,7 @@ static struct scene *create_scene(struct app *app, struct vk_core *vk) {
 
     struct transform *light_trans = push_light(scene);
     light_trans->position = { 1, -3, -3 };
-    light_trans->rotation = { 45.0f, -45.0f, 0.0f };
+    light_trans->rotation = { 45.0f, 0.0f, 0.0f };
 
     return scene;
 }
@@ -973,17 +976,15 @@ static void update_lights(struct scene *scene) {
         glm::mat4 view_mtx = glm::lookAt(light_pos, light_pos + light_forward, { 0.0f, -1.0f, 0.0f });
 
         // Projection Matrix
+#if 0
         f32 near_plane = 1.0f;
         f32 far_plane = 17.5f;
-        // glm::mat4 clip = glm::mat4( 0.5f, 0.0f, 0.0f, 0.0f,
-        //                             0.0f, 0.5f, 0.0f, 0.0f,
-        //                             0.0f, 0.0f, 1.0f, 0.0f,
-        //                             0.5f, 0.5f, 0.0f, 1.0f);
-        glm::mat4 proj_mtx = /*clip **/ glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
+        glm::mat4 proj_mtx = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
         proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
-
-        // glm::mat4 proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 20.0f);
-        // proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
+#else
+        glm::mat4 proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 20.0f);
+        proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
+#endif
 
         ubo->space_mtx = proj_mtx * view_mtx;
         ubo->position = trans->position;
