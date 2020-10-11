@@ -163,18 +163,19 @@ struct mesh {
 };
 
 struct model_ubo {
-    glm::mat4 model_mtx;
-    glm::mat4 mvp_mtx;
+    alignas(16) glm::mat4 model_mtx;
+    alignas(16) glm::mat4 mvp_mtx;
 };
 
 struct light_ubo {
-    glm::mat4 space_mtx;
-    struct ctk_v3 position;
+    alignas(16) glm::mat4 space_mtx;
+    alignas(16) struct ctk_v3 position;
+    alignas(16) struct ctk_v3 direction;
 };
 
 static u32 const MAX_ENTITIES = 1024;
 static u32 const MAX_LIGHTS = 16;
-static u32 const SHADOW_MAP_SIZE = 8192;
+static u32 const SHADOW_MAP_SIZE = 2048;
 
 struct app {
     struct vtk_vertex_layout vertex_layout;
@@ -952,7 +953,7 @@ static struct scene *create_scene(struct app *app, struct vk_core *vk) {
 
     struct transform *light_trans = push_light(scene);
     light_trans->position = { 1, -3, -3 };
-    light_trans->rotation = { 45.0f, 0.0f, 0.0f };
+    light_trans->rotation = { 45.0f, -45.0f, 0.0f };
 
     return scene;
 }
@@ -988,6 +989,7 @@ static void update_lights(struct scene *scene) {
 
         ubo->space_mtx = proj_mtx * view_mtx;
         ubo->position = trans->position;
+        ubo->direction = { light_forward.x, light_forward.y, light_forward.z };
     }
 }
 
