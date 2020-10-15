@@ -167,10 +167,16 @@ struct model_ubo {
     alignas(16) glm::mat4 mvp_mtx;
 };
 
+enum {
+    LIGHT_MODE_DIRECTIONAL,
+    LIGHT_MODE_POINT,
+};
+
 struct light_ubo {
     alignas(16) glm::mat4 space_mtx;
     alignas(16) struct ctk_v3 position;
     alignas(16) struct ctk_v3 direction;
+    s32 mode;
 };
 
 static u32 const MAX_ENTITIES = 1024;
@@ -768,6 +774,7 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "fullscreen_texture_vert"));
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "fullscreen_texture_frag"));
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.texture);
+        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.light_ubo);
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_inputs, { 0, 1, ctk_at(&app->vertex_layout.attributes, "uv") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
@@ -912,7 +919,8 @@ static struct transform *push_light(struct scene *scene) {
     if (scene->light.ubos.count == MAX_LIGHTS)
         CTK_FATAL("cannot push more lights to scene (max: %u)", MAX_LIGHTS)
     scene->light.count++;
-    ctk_push(&scene->light.ubos);
+    struct light_ubo *ubo = ctk_push(&scene->light.ubos);
+    ubo->mode = LIGHT_MODE_POINT;
     return ctk_push(&scene->light.transforms, DEFAULT_TRANSFORM);
 }
 
@@ -977,15 +985,16 @@ static void update_lights(struct scene *scene) {
         glm::mat4 view_mtx = glm::lookAt(light_pos, light_pos + light_forward, { 0.0f, -1.0f, 0.0f });
 
         // Projection Matrix
-#if 0
-        f32 near_plane = 1.0f;
-        f32 far_plane = 17.5f;
-        glm::mat4 proj_mtx = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
-        proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
-#else
-        glm::mat4 proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 20.0f);
-        proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
-#endif
+        glm::mat4 proj_mtx(1.0);
+        if (ubo->mode == LIGHT_MODE_DIRECTIONAL) {
+            f32 near_plane = 1.0f;
+            f32 far_plane = 17.5f;
+            proj_mtx = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
+            proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
+        } else {
+            proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 20.0f);
+            proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
+        }
 
         ubo->space_mtx = proj_mtx * view_mtx;
         ubo->position = trans->position;
@@ -1201,30 +1210,36 @@ static void transform_control(struct transform *t) {
     ImGui::DragFloat3("scale", &t->scale.x, 0.01f);
 }
 
+static void enum_dropdown(cstr id, cstr *elems, u32 elem_count, s32 *enum_val) {
+    cstr curr_elem = elems[*enum_val];
+    ImGui::PushItemWidth(-1);
+    char imgui_id[256] = {};
+    sprintf(imgui_id, "##%s", id);
+    if (ImGui::BeginCombo(imgui_id, curr_elem)) {
+        for (u32 i = 0; i < elem_count; ++i) {
+            cstr elem = elems[i];
+            bool selected = curr_elem == elem;
+            if (ImGui::Selectable(elem, selected))
+                *enum_val = i;
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::PopItemWidth();
+}
+
 static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    static cstr MODES[] = { "entities", "lights", "materials" };
-    cstr curr_mode = MODES[ui->mode];
     s32 window_flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove/* | ImGuiWindowFlags_NoResize*/;
     if (window_begin("states", 0, 0, 600, (s32)win->height, window_flags)) {
         ImGui::Columns(2, NULL);
 
-        ImGui::PushItemWidth(-1);
-        if (ImGui::BeginCombo("", curr_mode)) {
-            for (u32 i = 0; i < CTK_ARRAY_COUNT(MODES); ++i) {
-                cstr mode = MODES[i];
-                bool selected = curr_mode == mode;
-                if (ImGui::Selectable(mode, selected))
-                    ui->mode = i;
-                if (selected)
-                    ImGui::SetItemDefaultFocus();
-            }
-            ImGui::EndCombo();
-        }
-        ImGui::PopItemWidth();
+        static cstr UI_MODES[] = { "entities", "lights", "materials" };
+        enum_dropdown("ui_modes", UI_MODES, CTK_ARRAY_COUNT(UI_MODES), &ui->mode);
 
         if (ui->mode == UI_MODE_ENTITY) {
             if (list_box_begin("0", NULL, scene->entities.count)) {
@@ -1265,6 +1280,9 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
         } else if (ui->mode == UI_MODE_LIGHT) {
             // light *Light = scene->Lights + ui->light_idx;
             transform_control(scene->light.transforms + ui->light_idx);
+
+            static cstr LIGHT_MODES[] = { "directional", "point" };
+            enum_dropdown("light_modes", LIGHT_MODES, CTK_ARRAY_COUNT(LIGHT_MODES), &scene->light.ubos[ui->light_idx].mode);
             // separator();
             // ImGui::SliderFloat("intensity", &Light->Intensity, 0.0f, 1.0f);
             // ImGui::SliderFloat("ambient intensity", &Light->AmbientIntensity, 0.0f, 1.0f);
@@ -1485,9 +1503,12 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
             vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
                 struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.fullscreen_texture;
                 struct mesh *fullscreen_quad = ctk_at(&app->assets.meshes, "fullscreen_quad");
-                VkDescriptorSet desc_sets[] = { app->descriptor.sets.shadow_maps[0].instances[0] };
                 vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
-                vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->layout, 0, CTK_ARRAY_COUNT(desc_sets), desc_sets, 0, NULL);
+                struct vtk_descriptor_set_binding desc_set_bindings[] = {
+                    { app->descriptor.sets.shadow_maps + 0 },
+                    { &app->descriptor.sets.light_ubo, { 0u }, swapchain_img_idx },
+                };
+                vtk_bind_descriptor_sets(cmd_buf, gp->layout, 0, desc_set_bindings, CTK_ARRAY_COUNT(desc_set_bindings));
                 vkCmdBindVertexBuffers(cmd_buf, 0, 1, &fullscreen_quad->vertex_region.buffer->handle, &fullscreen_quad->vertex_region.offset);
                 vkCmdBindIndexBuffer(cmd_buf, fullscreen_quad->index_region.buffer->handle, fullscreen_quad->index_region.offset, VK_INDEX_TYPE_UINT32);
                 vkCmdDrawIndexed(cmd_buf, fullscreen_quad->indexes.count, 1, 0, 0, 0);
