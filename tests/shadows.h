@@ -26,7 +26,7 @@
 ////////////////////////////////////////////////////////////
 /// Window
 ////////////////////////////////////////////////////////////
-static struct ctk_v2d const UNSET_MOUSE_POSITION = { -10000.0, -10000.0 };
+static struct ctk_v2<f64> const UNSET_MOUSE_POSITION = { -10000.0, -10000.0 };
 
 struct window {
     GLFWwindow *handle;
@@ -34,8 +34,8 @@ struct window {
     u32 height;
     bool key_down[GLFW_KEY_LAST + 1];
     bool mouse_button_down[GLFW_MOUSE_BUTTON_LAST + 1];
-    struct ctk_v2d mouse_position = UNSET_MOUSE_POSITION;
-    struct ctk_v2d mouse_delta;
+    struct ctk_v2<f64> mouse_position = UNSET_MOUSE_POSITION;
+    struct ctk_v2<f64> mouse_delta;
 };
 
 static void error_callback(s32 err, cstr msg) {
@@ -150,9 +150,9 @@ struct texture_load_info : public asset_load_info {
 };
 
 struct vertex {
-    struct ctk_v3 position;
-    struct ctk_v3 normal;
-    struct ctk_v2 uv;
+    struct ctk_v3<f32> position;
+    struct ctk_v3<f32> normal;
+    struct ctk_v2<f32> uv;
 };
 
 struct mesh {
@@ -174,10 +174,10 @@ enum {
 
 struct light_ubo {
     alignas(16) glm::mat4 space_mtx;
-    alignas(16) struct ctk_v3 position;
-    alignas(16) struct ctk_v3 direction;
+    alignas(16) struct ctk_v3<f32> position;
+    alignas(16) struct ctk_v3<f32> direction;
     s32 mode;
-    alignas(16) struct ctk_v4 color;
+    alignas(16) struct ctk_v4<f32> color;
 };
 
 static u32 const MAX_ENTITIES = 1024;
@@ -807,7 +807,7 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "unlit_frag"));
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.light_ubo);
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.model_ubo);
-        ctk_push(&info.push_constant_ranges, { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct ctk_v4) });
+        ctk_push(&info.push_constant_ranges, { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct ctk_v4<f32>) });
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
         ctk_push(&info.viewports, { 0, 0, (f32)vk->swapchain.extent.width, (f32)vk->swapchain.extent.height, 0, 1 });
@@ -922,9 +922,9 @@ static struct app *create_app(struct vk_core *vk) {
 /// Scene
 ////////////////////////////////////////////////////////////
 struct transform {
-    struct ctk_v3 position;
-    struct ctk_v3 rotation;
-    struct ctk_v3 scale;
+    struct ctk_v3<f32> position;
+    struct ctk_v3<f32> rotation;
+    struct ctk_v3<f32> scale;
 };
 
 struct camera {
@@ -1376,7 +1376,7 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
 ////////////////////////////////////////////////////////////
 static void update_mouse_state(struct window *window) {
     // Mouse Delta
-    struct ctk_v2d prev_mouse_position = window->mouse_position;
+    struct ctk_v2<f64> prev_mouse_position = window->mouse_position;
     f64 curr_mouse_x = 0.0;
     f64 curr_mouse_y = 0.0;
     glfwGetCursorPos(window->handle, &curr_mouse_x, &curr_mouse_y);
@@ -1387,9 +1387,9 @@ static void update_mouse_state(struct window *window) {
         window->mouse_delta = window->mouse_position - prev_mouse_position;
 }
 
-static void local_translate(struct transform *transform, struct ctk_v3 translation) {
-    struct ctk_v3 *pos = &transform->position;
-    struct ctk_v3 *rot = &transform->rotation;
+static void local_translate(struct transform *transform, struct ctk_v3<f32> translation) {
+    struct ctk_v3<f32> *pos = &transform->position;
+    struct ctk_v3<f32> *rot = &transform->rotation;
 
     glm::mat4 world_mtx(1.0f);
     world_mtx = glm::rotate(world_mtx, glm::radians(rot->x), { 1.0f, 0.0f, 0.0f });
@@ -1397,22 +1397,22 @@ static void local_translate(struct transform *transform, struct ctk_v3 translati
     world_mtx = glm::rotate(world_mtx, glm::radians(rot->z), { 0.0f, 0.0f, 1.0f });
     world_mtx = glm::translate(world_mtx, { pos->x, pos->y, pos->z });
 
-    struct ctk_v3 right = {};
+    struct ctk_v3<f32> right = {};
     right.x = world_mtx[0][0];
     right.y = world_mtx[1][0];
     right.z = world_mtx[2][0];
 
-    struct ctk_v3 up = {};
+    struct ctk_v3<f32> up = {};
     up.x = world_mtx[0][1];
     up.y = world_mtx[1][1];
     up.z = world_mtx[2][1];
 
-    struct ctk_v3 forward = {};
+    struct ctk_v3<f32> forward = {};
     forward.x = world_mtx[0][2];
     forward.y = world_mtx[1][2];
     forward.z = world_mtx[2][2];
 
-    struct ctk_v3 new_pos = *pos;
+    struct ctk_v3<f32> new_pos = *pos;
     new_pos = new_pos + (right * translation.x);
     new_pos = new_pos + (up * translation.y);
     *pos = new_pos + (forward * translation.z);
@@ -1426,7 +1426,7 @@ static void camera_controls(struct transform *cam_trans, struct window *window) 
         cam_trans->rotation.x = ctk_clamp(cam_trans->rotation.x, -80.0f, 80.0f);
     }
 
-    struct ctk_v3 translation = {};
+    struct ctk_v3<f32> translation = {};
     f32 mod = window->key_down[GLFW_KEY_LEFT_SHIFT] ? 4 :
               window->key_down[GLFW_KEY_LEFT_CONTROL] ? 1 :
               2;
