@@ -42,12 +42,12 @@ static void error_callback(s32 err, cstr msg) {
     CTK_FATAL("[%d] %s", err, msg)
 }
 
-static void key_callback(GLFWwindow* glfw_win, s32 key, s32 scancode, s32 action, s32 mods) {
+static void key_callback(GLFWwindow *glfw_win, s32 key, s32 scancode, s32 action, s32 mods) {
     auto window = (struct window *)glfwGetWindowUserPointer(glfw_win);
     window->key_down[key] = action == GLFW_PRESS || action == GLFW_REPEAT;
 }
 
-static void mouse_button_callback(GLFWwindow* glfw_win, s32 button, s32 action, s32 mods) {
+static void mouse_button_callback(GLFWwindow *glfw_win, s32 button, s32 action, s32 mods) {
     auto window = (struct window *)glfwGetWindowUserPointer(glfw_win);
     window->mouse_button_down[button] = action == GLFW_PRESS || action == GLFW_REPEAT;
 }
@@ -1002,7 +1002,7 @@ static void update_lights(struct scene *scene) {
     }
 }
 
-static glm::mat4 camera_space_mtx(struct camera* cam) {
+static glm::mat4 camera_view_space_mtx(struct camera *cam) {
     struct transform *cam_trans = &cam->transform;
 
     // View Matrix
@@ -1026,7 +1026,7 @@ static void update_entities(struct scene *scene) {
     if (scene->entities.count == 0)
         return;
 
-    glm::mat4 view_space_mtx = camera_space_mtx(&scene->camera);
+    glm::mat4 view_space_mtx = camera_view_space_mtx(&scene->camera);
     for (u32 i = 0; i < scene->entities.count; ++i) {
         struct transform *trans = scene->entity.transforms + i;
         struct model_ubo *model_ubo = scene->entity.model_ubos + i;
@@ -1373,8 +1373,8 @@ static void camera_controls(struct transform *cam_trans, struct window *window) 
 ////////////////////////////////////////////////////////////
 static u32 vtk_aquire_swapchain_image_index(struct app *app, struct vk_core *vk) {
     u32 swapchain_img_idx = CTK_U32_MAX;
-    vtk_validate_result(vkAcquireNextImageKHR(vk->device.logical, vk->swapchain.handle, CTK_U64_MAX, app->frame_sync.img_aquired[app->frame_sync.curr_frame],
-                                              VK_NULL_HANDLE, &swapchain_img_idx),
+    VkSemaphore img_aquired_semaphore = app->frame_sync.img_aquired[app->frame_sync.curr_frame];
+    vtk_validate_result(vkAcquireNextImageKHR(vk->device.logical, vk->swapchain.handle, CTK_U64_MAX, img_aquired_semaphore, VK_NULL_HANDLE, &swapchain_img_idx),
                         "failed to aquire next swapchain image");
     return swapchain_img_idx;
 }
@@ -1463,6 +1463,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 struct vtk_descriptor_set_binding light_desc_set_binding = { &app->descriptor.sets.light_ubo, { 0u }, swapchain_img_idx };
                 vtk_bind_descriptor_sets(cmd_buf, gp->layout, 0, &light_desc_set_binding, 1);
 
+                // Render Entities
                 for (u32 i = 0; i < scene->entities.count; ++i) {
                     struct entity *e = scene->entities + i;
                     struct mesh *mesh = e->mesh;
@@ -1518,7 +1519,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
 #if 1
         // UI
         {
-            struct vtk_render_pass* render_pass = &ui->render_pass;
+            struct vtk_render_pass *rp = &ui->render_pass;
             ImGui::Render();
 
             VkRect2D render_area = {};
@@ -1528,11 +1529,11 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
 
             VkRenderPassBeginInfo rp_begin_info = {};
             rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            rp_begin_info.renderPass = render_pass->handle;
-            rp_begin_info.framebuffer = render_pass->framebuffers[swapchain_img_idx];
+            rp_begin_info.renderPass = rp->handle;
+            rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
             rp_begin_info.renderArea = render_area;
-            rp_begin_info.clearValueCount = render_pass->clear_values.count;
-            rp_begin_info.pClearValues = render_pass->clear_values.data;
+            rp_begin_info.clearValueCount = rp->clear_values.count;
+            rp_begin_info.pClearValues = rp->clear_values.data;
 
             vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
                 ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd_buf);
