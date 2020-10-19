@@ -9,6 +9,7 @@ layout (set = 0, binding = 0, std140) uniform u_light_ubo {
     vec3 pos;
     vec3 direction;
     int mode;
+    vec4 color;
 } light_ubo;
 
 layout (set = 2, binding = 0) uniform sampler2D tex;
