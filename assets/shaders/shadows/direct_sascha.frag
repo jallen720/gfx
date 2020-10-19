@@ -29,9 +29,8 @@ void main() {
     vec3 frag_light_dir = normalize(in_frag_light_dir);
 
     vec3 surface_color = texture(tex, in_frag_uv).rgb;
-    vec4 ambient = vec4(AMBIENT);
+    vec4 ambient = vec4(AMBIENT) * vec4(surface_color, 1);
     float shadow = calc_shadow(frag_pos_light_space);
-    vec3 diffuse = max(dot(frag_norm, frag_light_dir), 0.0) * surface_color;
-    out_color = (ambient + (shadow * vec4(diffuse, 1))) * vec4(surface_color, 1);
-
+    vec4 diffuse = max(dot(frag_norm, frag_light_dir), 0.0) * vec4(surface_color, 1);
+    out_color = (ambient + (shadow * diffuse));
 }
