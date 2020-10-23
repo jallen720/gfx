@@ -10,6 +10,8 @@ layout (set = 0, binding = 0, std140) uniform u_light_ubo {
     vec3 direction;
     int mode;
     vec4 color;
+    float min_bias;
+    float max_bias;
 } light_ubo;
 
 layout (set = 1, binding = 0, std140) uniform u_model_ubo {
@@ -36,9 +38,9 @@ void main() {
     vec4 vert_pos = vec4(in_vert_pos, 1);
     gl_Position = model_ubo.mvp_mtx * vert_pos;
     out_frag_pos_light_space = ndc_to_uv_mtx * light_ubo.space_mtx * model_ubo.model_mtx * vert_pos;
-    out_frag_norm = mat3(model_ubo.model_mtx) * in_vert_norm;
+    out_frag_norm = transpose(inverse(mat3(model_ubo.model_mtx))) * in_vert_norm;
     out_frag_uv = in_vert_uv;
     out_frag_light_dir = light_ubo.mode == LIGHT_MODE_DIRECTIONAL
                          ? -light_ubo.direction
-                         : light_ubo.pos - in_vert_pos;
+                         : light_ubo.pos - vec3(model_ubo.model_mtx * vert_pos);
 }

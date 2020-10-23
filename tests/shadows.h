@@ -178,11 +178,13 @@ struct light_ubo {
     alignas(16) struct ctk_v3<f32> direction;
     s32 mode;
     alignas(16) struct ctk_v4<f32> color;
+    int depth_bias;
+    int normal_bias;
 };
 
 static u32 const MAX_ENTITIES = 1024;
 static u32 const MAX_LIGHTS = 16;
-static u32 const SHADOW_MAP_SIZE = 2048;
+static u32 const SHADOW_MAP_SIZE = 8192;
 
 struct app {
     struct vtk_vertex_layout vertex_layout;
@@ -412,6 +414,7 @@ static void load_assets(struct app *app, struct vk_core *vk) {
     // Textures
     struct texture_load_info texture_load_infos[] = {
         { "wood", "assets/textures/wood.png", VK_FILTER_LINEAR },
+        { "brick", "assets/textures/brick.jpeg", VK_FILTER_LINEAR },
     };
     for (u32 i = 0; i < CTK_ARRAY_COUNT(texture_load_infos); ++i) {
         struct texture_load_info *asset_load_info = texture_load_infos + i;
@@ -428,6 +431,7 @@ static void load_assets(struct app *app, struct vk_core *vk) {
         { "quad", "assets/models/quad.obj" },
         { "fullscreen_quad", "assets/models/fullscreen_quad.obj" },
         { "light_diamond", "assets/models/light_diamond.obj" },
+        { "sibenik", "assets/models/sibenik/sibenik.obj" },
     };
     for (u32 i = 0; i < CTK_ARRAY_COUNT(mesh_infos); ++i) {
         struct asset_load_info *mesh_info = mesh_infos + i;
@@ -942,9 +946,16 @@ struct entity {
     struct vtk_descriptor_set *texture_desc_set;
 };
 
+struct light {
+    struct transform *transform;
+    struct model_ubo *model_ubo;
+    struct light_ubo *ubo;
+};
+
 struct scene {
     struct camera camera;
     struct ctk_array<struct entity, MAX_ENTITIES> entities;
+    struct ctk_array<struct light, MAX_LIGHTS> lights;
     struct {
         struct ctk_array<struct transform, MAX_ENTITIES> transforms;
         struct ctk_array<struct model_ubo, MAX_ENTITIES> model_ubos;
@@ -953,7 +964,6 @@ struct scene {
         struct ctk_array<struct transform, MAX_LIGHTS> transforms;
         struct ctk_array<struct model_ubo, MAX_LIGHTS> model_ubos;
         struct ctk_array<struct light_ubo, MAX_LIGHTS> ubos;
-        u32 count;
     } light;
 };
 
@@ -968,22 +978,24 @@ static struct entity *push_entity(struct scene *scene) {
     return entity;
 }
 
-static struct transform *push_light(struct scene *scene) {
+static struct light *push_light(struct scene *scene) {
     if (scene->light.ubos.count == MAX_LIGHTS)
         CTK_FATAL("cannot push more lights to scene (max: %u)", MAX_LIGHTS)
-    scene->light.count++;
-    ctk_push(&scene->light.model_ubos);
-    struct light_ubo *ubo = ctk_push(&scene->light.ubos);
-    ubo->mode = LIGHT_MODE_POINT;
-    ubo->color = { 1, 1, 1, 1 };
-    return ctk_push(&scene->light.transforms, DEFAULT_TRANSFORM);
+    struct light *light = ctk_push(&scene->lights);
+    light->transform = ctk_push(&scene->light.transforms, DEFAULT_TRANSFORM);
+    light->model_ubo = ctk_push(&scene->light.model_ubos);
+    light->ubo = ctk_push(&scene->light.ubos);
+    light->ubo->mode = LIGHT_MODE_POINT;
+    light->ubo->color = { 1, 1, 1, 1 };
+    return light;
 }
 
 static struct scene *create_scene(struct app *app, struct vk_core *vk) {
     struct scene *scene = ctk_zalloc<struct scene>();
 
     scene->camera.transform = DEFAULT_TRANSFORM;
-    scene->camera.transform.position = { 0, -1, -1 };
+    scene->camera.transform.position = { 5, -1, 1 };
+    scene->camera.transform.rotation = { 15, 90, 0 };
     scene->camera.fov = 90.0f;
     scene->camera.aspect = vk->swapchain.extent.width / (f32)vk->swapchain.extent.height;
     scene->camera.z_near = 0.1f;
@@ -1008,15 +1020,17 @@ static struct scene *create_scene(struct app *app, struct vk_core *vk) {
     floor->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "wood");
 
     struct entity *quad = push_entity(scene);
-    quad->transform->position = { 2.0f, -2.0f, 3.0f };
-    quad->transform->rotation = { -90.0f, 10.0f, 0.0f };
-    quad->transform->scale = { 4, 4, 1 };
-    quad->mesh = ctk_at(&app->assets.meshes, "quad");
-    quad->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "wood");
+    quad->transform->position = { 15.0f, -18.0f, 15.0f };
+    // quad->transform->rotation = { -90.0f, 10.0f, 0.0f };
+    // quad->transform->scale = { 4, 4, 1 };
+    quad->mesh = ctk_at(&app->assets.meshes, "sibenik");
+    quad->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "brick");
 
-    struct transform *light_trans = push_light(scene);
-    light_trans->position = { 1, -3, -3 };
-    light_trans->rotation = { 45.0f, -45.0f, 0.0f };
+    struct light *light = push_light(scene);
+    light->transform->position = { 2, -15, 15 };
+    light->transform->rotation = { 65.0f, -90.0f, 0.0f };
+    light->transform->scale = { 0.1f, 0.1f, 0.1f };
+    light->ubo->depth_bias = 1;
 
     return scene;
 }
@@ -1042,10 +1056,10 @@ static glm::mat4 camera_view_space_mtx(struct camera *cam) {
 }
 
 static void update_lights(struct app *app, struct vk_core *vk, struct scene *scene, glm::mat4 *view_space_mtx, u32 swapchain_img_idx) {
-    if (scene->light.count == 0)
+    if (scene->lights.count == 0)
         return;
 
-    for (u32 i = 0; i < scene->light.count; ++i) {
+    for (u32 i = 0; i < scene->lights.count; ++i) {
         struct transform *trans = scene->light.transforms + i;
         struct model_ubo *model_ubo = scene->light.model_ubos + i;
         struct light_ubo *ubo = scene->light.ubos + i;
@@ -1146,6 +1160,7 @@ static void check_vk_result(VkResult result) {
 
 static struct ui *create_ui(struct window *win, struct app *app, struct vk_core *vk) {
     struct ui *ui = ctk_zalloc<struct ui>();
+    ui->mode = UI_MODE_LIGHT;
 
     ////////////////////////////////////////////////////////////
     /// Init
@@ -1327,8 +1342,8 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
             }
             list_box_end();
         } else if (ui->mode == UI_MODE_LIGHT) {
-            if (list_box_begin("1", NULL, scene->light.count)) {
-                for (u32 i = 0; i < scene->light.count; ++i) {
+            if (list_box_begin("1", NULL, scene->lights.count)) {
+                for (u32 i = 0; i < scene->lights.count; ++i) {
                     char name[16] = {};
                     sprintf(name, "light %u", i);
                     if (ImGui::Selectable(name, i == ui->light_idx))
@@ -1354,7 +1369,8 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
 
             static cstr LIGHT_MODES[] = { "directional", "point" };
             enum_dropdown("light_modes", LIGHT_MODES, CTK_ARRAY_COUNT(LIGHT_MODES), &ubo->mode);
-
+            ImGui::InputInt("depth bias", &ubo->depth_bias);
+            ImGui::InputInt("normal bias", &ubo->normal_bias);
             ImGui::ColorPicker4("##color", &ubo->color.x);
             // separator();
             // ImGui::SliderFloat("intensity", &Light->Intensity, 0.0f, 1.0f);
@@ -1561,7 +1577,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, unlit_gp->handle);
 
                 struct mesh *light_diamond = ctk_at(&app->assets.meshes, "light_diamond");
-                for (u32 i = 0; i < scene->light.count; ++i) {
+                for (u32 i = 0; i < scene->lights.count; ++i) {
                     struct vtk_descriptor_set_binding desc_set_bindings[] = {
                         { &app->descriptor.sets.light_ubo, { i }, swapchain_img_idx },
                         { &app->descriptor.sets.light_model_ubo, { i }, swapchain_img_idx },
