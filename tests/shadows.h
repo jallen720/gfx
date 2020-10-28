@@ -416,9 +416,6 @@ static void load_assets(struct app *app, struct vk_core *vk) {
         { "shadow_frag", "assets/shaders/shadows/shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
         { "direct_vert", "assets/shaders/shadows/direct.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
         { "direct_frag", "assets/shaders/shadows/direct.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
-        { "direct_logl_frag", "assets/shaders/shadows/direct_logl.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
-        { "direct_sascha_vert", "assets/shaders/shadows/direct_sascha.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
-        { "direct_sascha_frag", "assets/shaders/shadows/direct_sascha.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
         { "unlit_vert", "assets/shaders/shadows/unlit.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
         { "unlit_frag", "assets/shaders/shadows/unlit.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
         { "fullscreen_texture_vert", "assets/shaders/shadows/fullscreen_texture.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
@@ -803,8 +800,8 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
     // Direct
     {
         struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
-        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "direct_sascha_vert"));
-        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "direct_sascha_frag"));
+        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "direct_vert"));
+        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "direct_frag"));
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.light_ubo);
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.model_ubo);
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.texture);
