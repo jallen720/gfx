@@ -172,18 +172,37 @@ enum {
     LIGHT_MODE_POINT,
 };
 
+static struct ctk_v2<f32> const LIGHT_ATTENUATION_CONSTS[] = {
+    { 0.7f,    1.8f      },
+    { 0.35f,   0.44f     },
+    { 0.22f,   0.20f     },
+    { 0.14f,   0.07f     },
+    { 0.09f,   0.032f    },
+    { 0.07f,   0.017f    },
+    { 0.045f,  0.0075f   },
+    { 0.027f,  0.0028f   },
+    { 0.022f,  0.0019f   },
+    { 0.014f,  0.0007f   },
+    { 0.007f,  0.0002f   },
+    { 0.0014f, 0.000007f },
+};
+
 struct light_ubo {
     alignas(16) glm::mat4 space_mtx;
     alignas(16) struct ctk_v3<f32> position;
     alignas(16) struct ctk_v3<f32> direction;
     s32 mode;
     alignas(16) struct ctk_v4<f32> color;
-    int depth_bias;
-    int normal_bias;
+    s32 depth_bias;
+    s32 normal_bias;
+    s32 slope_bias_scale_exponent;
+    f32 linear;
+    f32 quadratic;
 };
 
 static u32 const MAX_ENTITIES = 1024;
 static u32 const MAX_LIGHTS = 16;
+// static u32 const SHADOW_MAP_SIZE = 1024;
 static u32 const SHADOW_MAP_SIZE = 8192;
 
 struct app {
@@ -950,6 +969,7 @@ struct light {
     struct transform *transform;
     struct model_ubo *model_ubo;
     struct light_ubo *ubo;
+    u32 attenuation_index;
 };
 
 struct scene {
@@ -987,6 +1007,8 @@ static struct light *push_light(struct scene *scene) {
     light->ubo = ctk_push(&scene->light.ubos);
     light->ubo->mode = LIGHT_MODE_POINT;
     light->ubo->color = { 1, 1, 1, 1 };
+    light->ubo->slope_bias_scale_exponent = 4;
+    light->attenuation_index = 3;
     return light;
 }
 
@@ -994,8 +1016,8 @@ static struct scene *create_scene(struct app *app, struct vk_core *vk) {
     struct scene *scene = ctk_zalloc<struct scene>();
 
     scene->camera.transform = DEFAULT_TRANSFORM;
-    scene->camera.transform.position = { 5, -1, 1 };
-    scene->camera.transform.rotation = { 15, 90, 0 };
+    scene->camera.transform.position = { 10, -5, 14};
+    scene->camera.transform.rotation = { 45, 0, 0 };
     scene->camera.fov = 90.0f;
     scene->camera.aspect = vk->swapchain.extent.width / (f32)vk->swapchain.extent.height;
     scene->camera.z_near = 0.1f;
@@ -1005,7 +1027,7 @@ static struct scene *create_scene(struct app *app, struct vk_core *vk) {
         push_entity(scene),
         push_entity(scene),
     };
-    cubes[0]->transform->position = { 1.0f, -1.0f, 1.0f };
+    cubes[0]->transform->position = { 10.0f, -3.0f, 15.0f };
     cubes[0]->mesh = ctk_at(&app->assets.meshes, "cube");
     cubes[0]->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "wood");
 
@@ -1027,10 +1049,11 @@ static struct scene *create_scene(struct app *app, struct vk_core *vk) {
     quad->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "brick");
 
     struct light *light = push_light(scene);
-    light->transform->position = { 2, -15, 15 };
-    light->transform->rotation = { 65.0f, -90.0f, 0.0f };
+    light->transform->position = { 8, -4, 15.5f };
+    light->transform->rotation = { 0.0f, -90.0f, 0.0f };
     light->transform->scale = { 0.1f, 0.1f, 0.1f };
     light->ubo->depth_bias = 1;
+    light->attenuation_index = 8;
 
     return scene;
 }
@@ -1060,10 +1083,14 @@ static void update_lights(struct app *app, struct vk_core *vk, struct scene *sce
         return;
 
     for (u32 i = 0; i < scene->lights.count; ++i) {
+        struct light *light = scene->lights + i;
         struct transform *trans = scene->light.transforms + i;
         struct model_ubo *model_ubo = scene->light.model_ubos + i;
         struct light_ubo *ubo = scene->light.ubos + i;
 
+        struct ctk_v2<f32> const *atten_consts = LIGHT_ATTENUATION_CONSTS + light->attenuation_index;
+        ubo->linear = atten_consts->x;
+        ubo->quadratic = atten_consts->y;
         glm::vec3 light_pos = { trans->position.x, trans->position.y, trans->position.z };
 
         ////////////////////////////////////////////////////////////
@@ -1097,11 +1124,11 @@ static void update_lights(struct app *app, struct vk_core *vk, struct scene *sce
         glm::mat4 proj_mtx(1.0);
         if (ubo->mode == LIGHT_MODE_DIRECTIONAL) {
             f32 near_plane = 1.0f;
-            f32 far_plane = 17.5f;
+            f32 far_plane = 50.5f;
             proj_mtx = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
             proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
         } else {
-            proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 20.0f);
+            proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 50.0f);
             proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
         }
 
@@ -1364,21 +1391,17 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
             struct entity *entity = scene->entities + ui->entity_idx;
             transform_control(entity->transform);
         } else if (ui->mode == UI_MODE_LIGHT) {
+            struct light *light = scene->lights + ui->light_idx;
             struct light_ubo *ubo = scene->light.ubos + ui->light_idx;
             transform_control(scene->light.transforms + ui->light_idx);
 
             static cstr LIGHT_MODES[] = { "directional", "point" };
             enum_dropdown("light_modes", LIGHT_MODES, CTK_ARRAY_COUNT(LIGHT_MODES), &ubo->mode);
-            ImGui::InputInt("depth bias", &ubo->depth_bias);
-            ImGui::InputInt("normal bias", &ubo->normal_bias);
+            ImGui::InputInt("depth_bias", &ubo->depth_bias);
+            ImGui::InputInt("normal_bias", &ubo->normal_bias);
+            ImGui::InputInt("slope_bias_scale_exponent", &ubo->slope_bias_scale_exponent);
+            ImGui::SliderInt("attenuation_index", (s32*)&light->attenuation_index, 0, CTK_ARRAY_COUNT(LIGHT_ATTENUATION_CONSTS) - 1);
             ImGui::ColorPicker4("##color", &ubo->color.x);
-            // separator();
-            // ImGui::SliderFloat("intensity", &Light->Intensity, 0.0f, 1.0f);
-            // ImGui::SliderFloat("ambient intensity", &Light->AmbientIntensity, 0.0f, 1.0f);
-            // s32 *attenuation_index = (s32 *)(scene->LightAttenuationIndexes + ui->light_idx);
-            // if (ImGui::SliderInt("attenuation index", attenuation_index, 0, ATTENUATION_VALUE_COUNT - 1))
-            //     set_attenuation_values(Light, *attenuation_index);
-            // separator();
         } else if (ui->mode == UI_MODE_MATERIAL) {
             // struct material *material = State->Materials.Values + ui->material_idx;
             // ImGui::SliderInt("shine exponent", (s32 *)&material->ShineExponent, 4, 1024);
