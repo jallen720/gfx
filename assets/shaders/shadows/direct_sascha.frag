@@ -12,7 +12,6 @@ layout (set = 0, binding = 0, std140) uniform u_light_ubo {
     vec4 color;
     int depth_bias;
     int normal_bias;
-    int slope_bias_scale_exponent;
     float linear;
     float quadratic;
 } light_ubo;
@@ -55,12 +54,7 @@ float pcf_filter(vec4 frag_pos_light_space, float depth_bias) {
 }
 
 float depth_bias_scale(float frag_depth) {
-    return 1 - pow(0.0001, 1 - frag_depth);
-}
-
-float slope_bias_scale(vec3 frag_norm, vec3 frag_light_dir) {
-    // return 0.01 + (50 * (1 - max(dot(frag_norm, frag_light_dir), 0.0)));
-    return 0.01 + pow(1 - max(dot(frag_norm, frag_light_dir), 0.0), light_ubo.slope_bias_scale_exponent);
+    return 1 - frag_depth;
 }
 
 float calc_attenuation(float light_distance) {
@@ -70,21 +64,18 @@ float calc_attenuation(float light_distance) {
 
 void main() {
     float texel_size = 1 / length(textureSize(shadow_map, 0));
-    vec3 frag_norm = in_frag_norm;//normalize(in_frag_norm);
+    vec3 frag_norm = normalize(in_frag_norm);
     vec3 frag_light_dir = normalize(in_frag_light_dir);
     vec4 frag_pos_light_space = in_frag_pos_light_space / in_frag_pos_light_space.w;
     float bias_scale = depth_bias_scale(frag_pos_light_space.z);
-    // float bias_scale = slope_bias_scale(frag_norm, frag_light_dir);
-    // float bias_scale = (depth_bias_scale(frag_pos_light_space.z) + slope_bias_scale(frag_norm, frag_light_dir)) / 2;
-    // float bias_scale = max(depth_bias_scale(frag_pos_light_space.z), slope_bias_scale(frag_norm, frag_light_dir));
     float depth_bias = light_ubo.depth_bias * texel_size * bias_scale;
 
-    float ambient = 0.3;
+    float ambient = 0.2;
     float diffuse = max(dot(frag_norm, frag_light_dir), 0.0);
     float shadow = pcf_filter(frag_pos_light_space, depth_bias);
     float attenuation = calc_attenuation(distance(in_frag_pos, light_ubo.pos));
     vec4 light_color = light_ubo.color * (ambient + (shadow * diffuse)) * attenuation;
+    // vec4 surface_color = vec4(1);
     vec4 surface_color = texture(tex, in_frag_uv);
-    // out_color = vec4(bias_scale);
     out_color = surface_color * light_color;
 }

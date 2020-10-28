@@ -195,7 +195,6 @@ struct light_ubo {
     alignas(16) struct ctk_v4<f32> color;
     s32 depth_bias;
     s32 normal_bias;
-    s32 slope_bias_scale_exponent;
     f32 linear;
     f32 quadratic;
 };
@@ -1007,7 +1006,6 @@ static struct light *push_light(struct scene *scene) {
     light->ubo = ctk_push(&scene->light.ubos);
     light->ubo->mode = LIGHT_MODE_POINT;
     light->ubo->color = { 1, 1, 1, 1 };
-    light->ubo->slope_bias_scale_exponent = 4;
     light->attenuation_index = 3;
     return light;
 }
@@ -1399,7 +1397,6 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
             enum_dropdown("light_modes", LIGHT_MODES, CTK_ARRAY_COUNT(LIGHT_MODES), &ubo->mode);
             ImGui::InputInt("depth_bias", &ubo->depth_bias);
             ImGui::InputInt("normal_bias", &ubo->normal_bias);
-            ImGui::InputInt("slope_bias_scale_exponent", &ubo->slope_bias_scale_exponent);
             ImGui::SliderInt("attenuation_index", (s32*)&light->attenuation_index, 0, CTK_ARRAY_COUNT(LIGHT_ATTENUATION_CONSTS) - 1);
             ImGui::ColorPicker4("##color", &ubo->color.x);
         } else if (ui->mode == UI_MODE_MATERIAL) {
