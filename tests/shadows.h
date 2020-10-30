@@ -200,8 +200,13 @@ struct light_ubo {
     f32 ambient;
 };
 
+struct material_ubo {
+    u32 shine_exponent;
+};
+
 static u32 const MAX_ENTITIES = 1024;
 static u32 const MAX_LIGHTS = 16;
+static u32 const MAX_MATERIALS = 16;
 // static u32 const SHADOW_MAP_SIZE = 1024;
 static u32 const SHADOW_MAP_SIZE = 8192;
 
@@ -807,6 +812,7 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.model_ubo);
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.texture);
         ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.texture);
+        ctk_push(&info.push_constant_ranges, { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct ctk_v3<f32>) });
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_inputs, { 0, 1, ctk_at(&app->vertex_layout.attributes, "normal") });
         ctk_push(&info.vertex_inputs, { 0, 2, ctk_at(&app->vertex_layout.attributes, "uv") });
@@ -969,10 +975,16 @@ struct light {
     u32 attenuation_index;
 };
 
+struct material {
+    cstr name;
+    struct material_ubo *ubo;
+};
+
 struct scene {
     struct camera camera;
     struct ctk_array<struct entity, MAX_ENTITIES> entities;
     struct ctk_array<struct light, MAX_LIGHTS> lights;
+    struct ctk_array<struct material, MAX_MATERIALS> materials;
     struct {
         struct ctk_array<struct transform, MAX_ENTITIES> transforms;
         struct ctk_array<struct model_ubo, MAX_ENTITIES> model_ubos;
@@ -982,6 +994,9 @@ struct scene {
         struct ctk_array<struct model_ubo, MAX_LIGHTS> model_ubos;
         struct ctk_array<struct light_ubo, MAX_LIGHTS> ubos;
     } light;
+    struct {
+        struct ctk_array<struct material_ubo, MAX_MATERIALS> ubos;
+    } material;
 };
 
 static struct transform DEFAULT_TRANSFORM = { {}, {}, { 1, 1, 1 } };
@@ -1008,6 +1023,16 @@ static struct light *push_light(struct scene *s) {
     l->ubo->ambient = 0.3f;
     l->attenuation_index = 3;
     return l;
+}
+
+static struct material *push_material(struct scene *s, cstr name = NULL) {
+    if (s->materials.count == MAX_MATERIALS)
+        CTK_FATAL("cannot push more lights to scene (max: %u)", MAX_LIGHTS)
+    struct material *m = ctk_push(&s->materials);
+    m->name = name;
+    m->ubo = ctk_push(&s->material.ubos);
+    m->ubo->shine_exponent = 2;
+    return m;
 }
 
 static struct scene *create_scene(struct app *app, struct vk_core *vk) {
@@ -1050,6 +1075,9 @@ static struct scene *create_scene(struct app *app, struct vk_core *vk) {
     light->transform->scale = { 0.1f, 0.1f, 0.1f };
     light->ubo->depth_bias = 1;
     light->attenuation_index = 8;
+
+    struct material *mat = push_material(scene, "test");
+    mat->ubo->shine_exponent = 2;
 
     return scene;
 }
@@ -1375,11 +1403,19 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
             }
             list_box_end();
         } else if (ui->mode == UI_MODE_MATERIAL) {
-            // if (list_box_begin("2", NULL, State->Materials.count))
-            //     for (u32 i = 0; i < State->Materials.count; ++i)
-            //         if (ImGui::Selectable(State->Materials.keys[i], i == ui->material_idx))
-            //             ui->material_idx = i;
-            // list_box_end();
+            if (list_box_begin("2", NULL, scene->materials.count)) {
+                for (u32 i = 0; i < scene->materials.count; ++i) {
+                    cstr mat_name = scene->materials[i].name;
+                    char name[64] = {};
+                    if (mat_name != NULL)
+                        strcpy(name, mat_name);
+                    else
+                        sprintf(name, "material %u", i);
+                    if (ImGui::Selectable(name, i == ui->material_idx))
+                        ui->material_idx = i;
+                }
+            }
+            list_box_end();
         }
 
         ImGui::NextColumn();
@@ -1399,8 +1435,8 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
             ImGui::SliderFloat("ambient", &light->ubo->ambient, 0, 1, "%.2f");
             ImGui::ColorPicker4("##color", &ubo->color.x);
         } else if (ui->mode == UI_MODE_MATERIAL) {
-            // struct material *material = State->Materials.Values + ui->material_idx;
-            // ImGui::SliderInt("shine exponent", (s32 *)&material->ShineExponent, 4, 1024);
+            struct material *mat = scene->materials + ui->material_idx;
+            ImGui::SliderInt("shine_exponent", (s32 *)&mat->ubo->shine_exponent, 1, 256);
         }
     }
     window_end();
@@ -1567,6 +1603,9 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 ////////////////////////////////////////////////////////////
                 struct vtk_graphics_pipeline *direct_gp = &app->graphics_pipelines.direct;
                 vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, direct_gp->handle);
+
+                // Push Constants
+                vkCmdPushConstants(cmd_buf, direct_gp->layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct ctk_v3<f32>), &scene->camera.transform.position);
 
                 // Light Descriptor Sets
                 struct vtk_descriptor_set_binding light_desc_set_binding = { &app->descriptor.sets.light_ubo, { 0u }, swapchain_img_idx };

@@ -16,8 +16,14 @@ layout (set = 0, binding = 0, std140) uniform u_light_ubo {
     float quadratic;
     float ambient;
 } light_ubo;
+// layout (set = 2, binding = 0) uniform u_material {
+//     uint shine_exponent;
+// } material;
 layout (set = 2, binding = 0) uniform sampler2D tex;
 layout (set = 3, binding = 0) uniform sampler2D shadow_map;
+layout (push_constant) uniform u_push_constants {
+    vec3 view_pos;
+} push_constants;
 
 layout (location = 0) in vec3 in_frag_pos;
 layout (location = 1) in vec4 in_frag_pos_light_space;
