@@ -53,7 +53,7 @@ static void mouse_button_callback(GLFWwindow *glfw_win, s32 button, s32 action, 
 }
 
 static struct window *create_window() {
-    struct window *win = ctk_zalloc<struct window>();
+    auto win = ctk_zalloc<struct window>();
     glfwSetErrorCallback(error_callback);
     if (glfwInit() != GLFW_TRUE)
         CTK_FATAL("failed to init glfw")
@@ -109,7 +109,7 @@ static void create_buffers(struct vk_core *vk) {
 }
 
 static struct vk_core *create_vk_core(struct window *window) {
-    struct vk_core *vk = ctk_zalloc<vk_core>();
+    auto vk = ctk_zalloc<vk_core>();
 
     vk->instance = vtk_create_instance();
     vtk_validate_result(glfwCreateWindowSurface(vk->instance.handle, window->handle, NULL, &vk->surface), "failed to create glfw surface");
@@ -883,7 +883,7 @@ static void init_frame_sync(struct app *app, struct vk_core *vk) {
 }
 
 static struct app *create_app(struct vk_core *vk) {
-    struct app *app = ctk_zalloc<struct app>();
+    auto app = ctk_zalloc<struct app>();
 
     // Vertex Layout
     vtk_push_vertex_attribute(&app->vertex_layout, "position", 3);
@@ -985,30 +985,30 @@ struct scene {
 
 static struct transform DEFAULT_TRANSFORM = { {}, {}, { 1, 1, 1 } };
 
-static struct entity *push_entity(struct scene *scene) {
-    if (scene->entities.count == MAX_ENTITIES)
+static struct entity *push_entity(struct scene *s, cstr name = NULL) {
+    if (s->entities.count == MAX_ENTITIES)
         CTK_FATAL("cannot push more entities to scene (max: %u)", MAX_ENTITIES)
-    ctk_push(&scene->entity.model_ubos);
-    struct entity *entity = ctk_push(&scene->entities);
-    entity->transform = ctk_push(&scene->entity.transforms, DEFAULT_TRANSFORM);
-    return entity;
+    ctk_push(&s->entity.model_ubos);
+    struct entity *e = ctk_push(&s->entities);
+    e->transform = ctk_push(&s->entity.transforms, DEFAULT_TRANSFORM);
+    return e;
 }
 
-static struct light *push_light(struct scene *scene) {
-    if (scene->light.ubos.count == MAX_LIGHTS)
+static struct light *push_light(struct scene *s) {
+    if (s->lights.count == MAX_LIGHTS)
         CTK_FATAL("cannot push more lights to scene (max: %u)", MAX_LIGHTS)
-    struct light *light = ctk_push(&scene->lights);
-    light->transform = ctk_push(&scene->light.transforms, DEFAULT_TRANSFORM);
-    light->model_ubo = ctk_push(&scene->light.model_ubos);
-    light->ubo = ctk_push(&scene->light.ubos);
-    light->ubo->mode = LIGHT_MODE_POINT;
-    light->ubo->color = { 1, 1, 1, 1 };
-    light->attenuation_index = 3;
-    return light;
+    struct light *l = ctk_push(&s->lights);
+    l->transform = ctk_push(&s->light.transforms, DEFAULT_TRANSFORM);
+    l->model_ubo = ctk_push(&s->light.model_ubos);
+    l->ubo = ctk_push(&s->light.ubos);
+    l->ubo->mode = LIGHT_MODE_POINT;
+    l->ubo->color = { 1, 1, 1, 1 };
+    l->attenuation_index = 3;
+    return l;
 }
 
 static struct scene *create_scene(struct app *app, struct vk_core *vk) {
-    struct scene *scene = ctk_zalloc<struct scene>();
+    auto scene = ctk_zalloc<struct scene>();
 
     scene->camera.transform = DEFAULT_TRANSFORM;
     scene->camera.transform.position = { 10, -5, 14};
@@ -1036,12 +1036,10 @@ static struct scene *create_scene(struct app *app, struct vk_core *vk) {
     floor->mesh = ctk_at(&app->assets.meshes, "quad");
     floor->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "wood");
 
-    struct entity *quad = push_entity(scene);
-    quad->transform->position = { 15.0f, -18.0f, 15.0f };
-    // quad->transform->rotation = { -90.0f, 10.0f, 0.0f };
-    // quad->transform->scale = { 4, 4, 1 };
-    quad->mesh = ctk_at(&app->assets.meshes, "sibenik");
-    quad->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "brick");
+    struct entity *sibenik = push_entity(scene);
+    sibenik->transform->position = { 15.0f, -18.0f, 15.0f };
+    sibenik->mesh = ctk_at(&app->assets.meshes, "sibenik");
+    sibenik->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "brick");
 
     struct light *light = push_light(scene);
     light->transform->position = { 8, -4, 15.5f };
@@ -1181,7 +1179,7 @@ static void check_vk_result(VkResult result) {
 }
 
 static struct ui *create_ui(struct window *win, struct app *app, struct vk_core *vk) {
-    struct ui *ui = ctk_zalloc<struct ui>();
+    auto ui = ctk_zalloc<struct ui>();
     ui->mode = UI_MODE_LIGHT;
 
     ////////////////////////////////////////////////////////////

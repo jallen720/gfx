@@ -15,7 +15,6 @@ layout (set = 0, binding = 0, std140) uniform u_light_ubo {
     float linear;
     float quadratic;
 } light_ubo;
-
 layout (set = 2, binding = 0) uniform sampler2D tex;
 layout (set = 3, binding = 0) uniform sampler2D shadow_map;
 
@@ -70,12 +69,12 @@ void main() {
     float bias_scale = depth_bias_scale(frag_pos_light_space.z);
     float depth_bias = light_ubo.depth_bias * texel_size * bias_scale;
 
+    // Light Calculations
     float ambient = 0.2;
     float diffuse = max(dot(frag_norm, frag_light_dir), 0.0);
     float shadow = pcf_filter(frag_pos_light_space, depth_bias);
     float attenuation = calc_attenuation(distance(in_frag_pos, light_ubo.pos));
     vec4 light_color = light_ubo.color * (ambient + (shadow * diffuse)) * attenuation;
-    // vec4 surface_color = vec4(1);
     vec4 surface_color = texture(tex, in_frag_uv);
     out_color = surface_color * light_color;
 }
