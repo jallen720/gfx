@@ -197,6 +197,7 @@ struct light_ubo {
     s32 normal_bias;
     f32 linear;
     f32 quadratic;
+    f32 ambient;
 };
 
 static u32 const MAX_ENTITIES = 1024;
@@ -1003,6 +1004,8 @@ static struct light *push_light(struct scene *s) {
     l->ubo = ctk_push(&s->light.ubos);
     l->ubo->mode = LIGHT_MODE_POINT;
     l->ubo->color = { 1, 1, 1, 1 };
+    l->ubo->normal_bias = 16;
+    l->ubo->ambient = 0.3f;
     l->attenuation_index = 3;
     return l;
 }
@@ -1121,7 +1124,7 @@ static void update_lights(struct app *app, struct vk_core *vk, struct scene *sce
             proj_mtx = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
             proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
         } else {
-            proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 50.0f);
+            proj_mtx = glm::perspective(glm::radians(130.0f), 1.0f, 0.1f, 50.0f);
             proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
         }
 
@@ -1393,6 +1396,7 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
             ImGui::InputInt("depth_bias", &ubo->depth_bias);
             ImGui::InputInt("normal_bias", &ubo->normal_bias);
             ImGui::SliderInt("attenuation_index", (s32*)&light->attenuation_index, 0, CTK_ARRAY_COUNT(LIGHT_ATTENUATION_CONSTS) - 1);
+            ImGui::SliderFloat("ambient", &light->ubo->ambient, 0, 1, "%.2f");
             ImGui::ColorPicker4("##color", &ubo->color.x);
         } else if (ui->mode == UI_MODE_MATERIAL) {
             // struct material *material = State->Materials.Values + ui->material_idx;
