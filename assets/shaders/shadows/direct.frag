@@ -21,6 +21,7 @@ layout (set = 0, binding = 0, std140) uniform u_light_ubo {
 // } material;
 layout (set = 2, binding = 0) uniform sampler2D tex;
 layout (set = 3, binding = 0) uniform sampler2D shadow_map;
+layout (set = 4, binding = 0) uniform samplerCube cube_shadow_map;
 layout (push_constant) uniform u_push_constants {
     vec3 view_pos;
 } push_constants;

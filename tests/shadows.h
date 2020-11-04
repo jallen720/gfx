@@ -207,8 +207,9 @@ struct material_ubo {
 static u32 const MAX_ENTITIES = 1024;
 static u32 const MAX_LIGHTS = 16;
 static u32 const MAX_MATERIALS = 16;
-// static u32 const SHADOW_MAP_SIZE = 1024;
-static u32 const SHADOW_MAP_SIZE = 8192;
+static u32 const SHADOW_MAP_SIZE = 4096;
+// static u32 const SHADOW_MAP_SIZE = 8192;
+static VkFormat const OMNI_SHADOW_MAP_FORMAT = VK_FORMAT_R32_SFLOAT; // Image will have color aspect but hold depth data.
 
 struct app {
     struct vtk_vertex_layout vertex_layout;
@@ -220,7 +221,10 @@ struct app {
     struct {
         struct vtk_image depth;
     } attachment_imgs;
-    struct ctk_array<struct vtk_texture, 16> shadow_maps;
+    struct {
+        struct vtk_texture directional;
+        struct vtk_texture omni;
+    } shadow_maps;
     struct {
         VkCommandBuffer one_time;
         struct ctk_array<VkCommandBuffer, 4> render;
@@ -242,9 +246,12 @@ struct app {
             struct vtk_descriptor_set light_model_ubo;
             struct vtk_descriptor_set light_ubo;
             struct ctk_map<struct vtk_descriptor_set, 16> textures;
-            struct ctk_array<struct vtk_descriptor_set, 16> shadow_maps;
+            struct {
+                struct vtk_descriptor_set directional;
+                struct vtk_descriptor_set omni;
+            } shadow_maps;
         } sets;
-    } descriptor;
+    } descriptors;
     struct {
         struct vtk_render_pass direct;
         struct vtk_render_pass shadow;
@@ -460,6 +467,17 @@ static void load_assets(struct app *app, struct vk_core *vk) {
     }
 }
 
+static void allocate_shadow_map_descriptor_set(struct app *app, struct vk_core *vk, struct vtk_descriptor_set *ds) {
+    ds->instances.count = 1;
+
+    VkDescriptorSetAllocateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    info.descriptorPool = app->descriptors.pool;
+    info.descriptorSetCount = ds->instances.count;
+    info.pSetLayouts = &app->descriptors.set_layouts.texture;
+    vtk_validate_result(vkAllocateDescriptorSets(vk->device.logical, &info, ds->instances.data), "failed to allocate descriptor sets");
+}
+
 static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
     // Pool
     VkDescriptorPoolSize pool_sizes[] = {
@@ -474,7 +492,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
     pool_info.maxSets = 64;
     pool_info.poolSizeCount = CTK_ARRAY_COUNT(pool_sizes);
     pool_info.pPoolSizes = pool_sizes;
-    vtk_validate_result(vkCreateDescriptorPool(vk->device.logical, &pool_info, NULL, &app->descriptor.pool), "failed to create descriptor pool");
+    vtk_validate_result(vkCreateDescriptorPool(vk->device.logical, &pool_info, NULL, &app->descriptors.pool), "failed to create descriptor pool");
 
     // Layouts
 
@@ -485,7 +503,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
         info.pBindings = &binding;
-        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptor.set_layouts.model_ubo), "error creating descriptor set layout");
+        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptors.set_layouts.model_ubo), "error creating descriptor set layout");
     }
 
     // light_ubo
@@ -495,7 +513,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
         info.pBindings = &binding;
-        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptor.set_layouts.light_ubo), "error creating descriptor set layout");
+        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptors.set_layouts.light_ubo), "error creating descriptor set layout");
     }
 
     // texture
@@ -505,48 +523,39 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
         info.pBindings = &binding;
-        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptor.set_layouts.texture), "error creating descriptor set layout");
+        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptors.set_layouts.texture), "error creating descriptor set layout");
     }
 
     // Sets
 
     // entity_model_ubo
-    vtk_allocate_descriptor_set(&app->descriptor.sets.entity_model_ubo, app->descriptor.set_layouts.model_ubo, vk->swapchain.image_count, vk->device.logical, app->descriptor.pool);
-    ctk_push(&app->descriptor.sets.entity_model_ubo.dynamic_offsets, app->uniform_bufs.entity_model_ubos.element_size);
+    vtk_allocate_descriptor_set(&app->descriptors.sets.entity_model_ubo, app->descriptors.set_layouts.model_ubo, vk->swapchain.image_count, vk->device.logical, app->descriptors.pool);
+    ctk_push(&app->descriptors.sets.entity_model_ubo.dynamic_offsets, app->uniform_bufs.entity_model_ubos.element_size);
 
     // light_model_ubo
-    vtk_allocate_descriptor_set(&app->descriptor.sets.light_model_ubo, app->descriptor.set_layouts.model_ubo, vk->swapchain.image_count, vk->device.logical, app->descriptor.pool);
-    ctk_push(&app->descriptor.sets.light_model_ubo.dynamic_offsets, app->uniform_bufs.light_model_ubos.element_size);
+    vtk_allocate_descriptor_set(&app->descriptors.sets.light_model_ubo, app->descriptors.set_layouts.model_ubo, vk->swapchain.image_count, vk->device.logical, app->descriptors.pool);
+    ctk_push(&app->descriptors.sets.light_model_ubo.dynamic_offsets, app->uniform_bufs.light_model_ubos.element_size);
 
     // light_ubo
-    vtk_allocate_descriptor_set(&app->descriptor.sets.light_ubo, app->descriptor.set_layouts.light_ubo, vk->swapchain.image_count, vk->device.logical, app->descriptor.pool);
-    ctk_push(&app->descriptor.sets.light_ubo.dynamic_offsets, app->uniform_bufs.light_ubos.element_size);
+    vtk_allocate_descriptor_set(&app->descriptors.sets.light_ubo, app->descriptors.set_layouts.light_ubo, vk->swapchain.image_count, vk->device.logical, app->descriptors.pool);
+    ctk_push(&app->descriptors.sets.light_ubo.dynamic_offsets, app->uniform_bufs.light_ubos.element_size);
 
     // textures
     for (u32 i = 0; i < app->assets.textures.count; ++i) {
-        struct vtk_descriptor_set *ds = ctk_push(&app->descriptor.sets.textures, app->assets.textures.keys[i]);
+        struct vtk_descriptor_set *ds = ctk_push(&app->descriptors.sets.textures, app->assets.textures.keys[i]);
         ds->instances.count = 1;
 
         VkDescriptorSetAllocateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        info.descriptorPool = app->descriptor.pool;
+        info.descriptorPool = app->descriptors.pool;
         info.descriptorSetCount = ds->instances.count;
-        info.pSetLayouts = &app->descriptor.set_layouts.texture;
+        info.pSetLayouts = &app->descriptors.set_layouts.texture;
         vtk_validate_result(vkAllocateDescriptorSets(vk->device.logical, &info, ds->instances.data), "failed to allocate descriptor sets");
     }
 
     // shadow_maps
-    for (u32 i = 0; i < app->shadow_maps.count; ++i) {
-        struct vtk_descriptor_set *ds = ctk_push(&app->descriptor.sets.shadow_maps);
-        ds->instances.count = 1;
-
-        VkDescriptorSetAllocateInfo info = {};
-        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        info.descriptorPool = app->descriptor.pool;
-        info.descriptorSetCount = ds->instances.count;
-        info.pSetLayouts = &app->descriptor.set_layouts.texture;
-        vtk_validate_result(vkAllocateDescriptorSets(vk->device.logical, &info, ds->instances.data), "failed to allocate descriptor sets");
-    }
+    allocate_shadow_map_descriptor_set(app, vk, &app->descriptors.sets.shadow_maps.directional);
+    allocate_shadow_map_descriptor_set(app, vk, &app->descriptors.sets.shadow_maps.omni);
 
     // Updates
     struct ctk_array<VkDescriptorBufferInfo, 32> buf_infos = {};
@@ -563,7 +572,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
 
         VkWriteDescriptorSet *write = ctk_push(&writes);
         write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write->dstSet = app->descriptor.sets.entity_model_ubo.instances[i];
+        write->dstSet = app->descriptors.sets.entity_model_ubo.instances[i];
         write->dstBinding = 0;
         write->dstArrayElement = 0;
         write->descriptorCount = 1;
@@ -581,7 +590,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
 
         VkWriteDescriptorSet *write = ctk_push(&writes);
         write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write->dstSet = app->descriptor.sets.light_model_ubo.instances[i];
+        write->dstSet = app->descriptors.sets.light_model_ubo.instances[i];
         write->dstBinding = 0;
         write->dstArrayElement = 0;
         write->descriptorCount = 1;
@@ -599,7 +608,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
 
         VkWriteDescriptorSet *write = ctk_push(&writes);
         write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write->dstSet = app->descriptor.sets.light_ubo.instances[i];
+        write->dstSet = app->descriptors.sets.light_ubo.instances[i];
         write->dstBinding = 0;
         write->dstArrayElement = 0;
         write->descriptorCount = 1;
@@ -616,7 +625,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
         info->imageView = t->view;
         info->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-        struct vtk_descriptor_set *ds = ctk_at(&app->descriptor.sets.textures, app->assets.textures.keys[i]);
+        struct vtk_descriptor_set *ds = ctk_at(&app->descriptors.sets.textures, app->assets.textures.keys[i]);
         VkWriteDescriptorSet *write = ctk_push(&writes);
         write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         write->dstSet = ds->instances[0];
@@ -628,15 +637,37 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
     }
 
     // shadow_maps
-    for (u32 i = 0; i < app->shadow_maps.count; ++i) {
-        struct vtk_texture *t = app->shadow_maps + i;
+
+    // directional
+    {
+        struct vtk_texture *shadow_map = &app->shadow_maps.directional;
 
         VkDescriptorImageInfo *info = ctk_push(&img_infos);
-        info->sampler = t->sampler;
-        info->imageView = t->view;
+        info->sampler = shadow_map->sampler;
+        info->imageView = shadow_map->view;
         info->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-        struct vtk_descriptor_set *ds = app->descriptor.sets.shadow_maps + i;
+        struct vtk_descriptor_set *ds = &app->descriptors.sets.shadow_maps.directional;
+        VkWriteDescriptorSet *write = ctk_push(&writes);
+        write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write->dstSet = ds->instances[0];
+        write->dstBinding = 0;
+        write->dstArrayElement = 0;
+        write->descriptorCount = 1;
+        write->descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write->pImageInfo = info;
+    }
+
+    // omni
+    {
+        struct vtk_texture *shadow_map = &app->shadow_maps.omni;
+
+        VkDescriptorImageInfo *info = ctk_push(&img_infos);
+        info->sampler = shadow_map->sampler;
+        info->imageView = shadow_map->view;
+        info->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        struct vtk_descriptor_set *ds = &app->descriptors.sets.shadow_maps.omni;
         VkWriteDescriptorSet *write = ctk_push(&writes);
         write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         write->dstSet = ds->instances[0];
@@ -686,7 +717,7 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
         // Framebuffer Infos
         for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
             struct vtk_framebuffer_info *fb_info = ctk_push(&rp_info.framebuffer_infos);
-            ctk_push(&fb_info->attachments, app->shadow_maps[0].view);
+            ctk_push(&fb_info->attachments, app->shadow_maps.directional.view);
             fb_info->extent.width = SHADOW_MAP_SIZE;
             fb_info->extent.height = SHADOW_MAP_SIZE;
             fb_info->layers = 1;
@@ -790,8 +821,8 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "shadow_vert"));
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "shadow_frag"));
-        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.light_ubo);
-        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.model_ubo);
+        ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.light_ubo);
+        ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.model_ubo);
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
         ctk_push(&info.viewports, { 0, 0, (f32)SHADOW_MAP_SIZE, (f32)SHADOW_MAP_SIZE, 0, 1 });
@@ -808,10 +839,10 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "direct_vert"));
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "direct_frag"));
-        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.light_ubo);
-        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.model_ubo);
-        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.texture);
-        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.texture);
+        ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.light_ubo);
+        ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.model_ubo);
+        ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.texture);
+        ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.texture);
         ctk_push(&info.push_constant_ranges, { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct ctk_v3<f32>) });
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_inputs, { 0, 1, ctk_at(&app->vertex_layout.attributes, "normal") });
@@ -831,8 +862,8 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "unlit_vert"));
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "unlit_frag"));
-        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.light_ubo);
-        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.model_ubo);
+        ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.light_ubo);
+        ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.model_ubo);
         ctk_push(&info.push_constant_ranges, { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct ctk_v4<f32>) });
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
@@ -850,8 +881,8 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "fullscreen_texture_vert"));
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "fullscreen_texture_frag"));
-        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.texture);
-        ctk_push(&info.descriptor_set_layouts, app->descriptor.set_layouts.light_ubo);
+        ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.texture);
+        ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.light_ubo);
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_inputs, { 0, 1, ctk_at(&app->vertex_layout.attributes, "uv") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
@@ -871,22 +902,123 @@ static void init_frame_sync(struct app *app, struct vk_core *vk) {
     app->frame_sync.in_flight.count = app->frame_sync.frame_count;
 
     // Frame Sync Objects
-    VkSemaphoreCreateInfo semaphore_ci = {};
-    semaphore_ci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    semaphore_ci.flags = 0;
+    VkSemaphoreCreateInfo semaphore_info = {};
+    semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    semaphore_info.flags = 0;
 
-    VkFenceCreateInfo fence_ci = {};
-    fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fence_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    VkFenceCreateInfo fence_info = {};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
     for (u32 i = 0; i < app->frame_sync.frame_count; ++i) {
-        vtk_validate_result(vkCreateSemaphore(vk->device.logical, &semaphore_ci, NULL, app->frame_sync.img_aquired + i), "failed to create semaphore");
-        vtk_validate_result(vkCreateSemaphore(vk->device.logical, &semaphore_ci, NULL, app->frame_sync.render_finished + i), "failed to create semaphore");
-        vtk_validate_result(vkCreateFence(vk->device.logical, &fence_ci, NULL, app->frame_sync.in_flight + i), "failed to create fence");
+        vtk_validate_result(vkCreateSemaphore(vk->device.logical, &semaphore_info, NULL, app->frame_sync.img_aquired + i), "failed to create semaphore");
+        vtk_validate_result(vkCreateSemaphore(vk->device.logical, &semaphore_info, NULL, app->frame_sync.render_finished + i), "failed to create semaphore");
+        vtk_validate_result(vkCreateFence(vk->device.logical, &fence_info, NULL, app->frame_sync.in_flight + i), "failed to create fence");
     }
 
     for (u32 i = 0; i < vk->swapchain.image_count; ++i)
         app->frame_sync.img_prev_frame[i] = CTK_U32_MAX;
+}
+
+static void create_shadow_maps(struct app *app, struct vk_core *vk) {
+    // Directional
+    {
+        struct vtk_texture_info info = vtk_default_texture_info();
+        info.memory_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+        info.image.extent.width = SHADOW_MAP_SIZE;
+        info.image.extent.height = SHADOW_MAP_SIZE;
+        info.image.format = vk->device.depth_image_format;
+        info.image.tiling = VK_IMAGE_TILING_OPTIMAL;
+        info.image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        info.view.format = vk->device.depth_image_format;
+        info.view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        info.sampler.magFilter = VK_FILTER_NEAREST;
+        info.sampler.minFilter = VK_FILTER_NEAREST;
+        info.sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        info.sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        app->shadow_maps.directional = vtk_create_texture(&info, &vk->device);
+    }
+
+    // Omni
+    {
+        struct vtk_texture_info info = {};
+        info.memory_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+        info.image.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        info.image.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+        info.image.imageType = VK_IMAGE_TYPE_2D;
+        info.image.format = OMNI_SHADOW_MAP_FORMAT;
+        info.image.extent.width = SHADOW_MAP_SIZE;
+        info.image.extent.height = SHADOW_MAP_SIZE;
+        info.image.extent.depth = 1;
+        info.image.mipLevels = 1;
+        info.image.arrayLayers = 6;
+        info.image.samples = VK_SAMPLE_COUNT_1_BIT;
+        info.image.tiling = VK_IMAGE_TILING_OPTIMAL;
+        info.image.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        info.image.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        info.image.queueFamilyIndexCount = 0; // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
+        info.image.pQueueFamilyIndices = NULL; // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
+        info.image.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        info.view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        info.view.flags = 0;
+        info.view.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+        info.view.format = OMNI_SHADOW_MAP_FORMAT;
+        info.view.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        info.view.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        info.view.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        info.view.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+        info.view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        info.view.subresourceRange.baseMipLevel = 0;
+        info.view.subresourceRange.levelCount = 1;
+        info.view.subresourceRange.baseArrayLayer = 0;
+        info.view.subresourceRange.layerCount = 6;
+
+        info.sampler.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        info.sampler.magFilter = VK_FILTER_LINEAR;
+        info.sampler.minFilter = VK_FILTER_LINEAR;
+        info.sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        info.sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        info.sampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        info.sampler.anisotropyEnable = VK_TRUE;
+        info.sampler.maxAnisotropy = 16;
+        info.sampler.borderColor = VK_BORDER_COLOR_INT_OPAQUE_WHITE;
+        info.sampler.unnormalizedCoordinates = VK_FALSE;
+        info.sampler.compareEnable = VK_FALSE;
+        info.sampler.compareOp = VK_COMPARE_OP_NEVER;
+        info.sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        info.sampler.mipLodBias = 0.0f;
+        info.sampler.minLod = 0.0f;
+        info.sampler.maxLod = 0.0f;
+
+        app->shadow_maps.omni = vtk_create_texture(&info, &vk->device);
+
+        // Manually transition image omni shadow-map layout as it is not implicitly transitioned by any subpasses.
+        vtk_begin_one_time_command_buffer(app->cmd_bufs.one_time);
+            VkImageMemoryBarrier img_barrier = {};
+            img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            img_barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+            img_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            img_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            img_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            img_barrier.image = app->shadow_maps.omni.handle;
+            img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            img_barrier.subresourceRange.baseMipLevel = 0;
+            img_barrier.subresourceRange.levelCount = 1;
+            img_barrier.subresourceRange.baseArrayLayer = 0;
+            img_barrier.subresourceRange.layerCount = 6;
+            vkCmdPipelineBarrier(app->cmd_bufs.one_time,
+                                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                 0, // Dependency Flags
+                                 0, NULL, // Memory Barriers
+                                 0, NULL, // Buffer Memory Barriers
+                                 1, &img_barrier); // Image Memory Barriers
+        vtk_submit_one_time_command_buffer(app->cmd_bufs.one_time, vk->device.queues.graphics);
+    }
 }
 
 static struct app *create_app(struct vk_core *vk) {
@@ -915,26 +1047,13 @@ static struct app *create_app(struct vk_core *vk) {
     app->attachment_imgs.depth = vtk_create_image(&depth_image_info, &vk->device);
 
     // Shadow Maps
-    struct vtk_texture_info shadow_map_info = vtk_default_texture_info();
-    shadow_map_info.memory_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    shadow_map_info.image.extent.width = SHADOW_MAP_SIZE;
-    shadow_map_info.image.extent.height = SHADOW_MAP_SIZE;
-    shadow_map_info.image.format = vk->device.depth_image_format;
-    shadow_map_info.image.tiling = VK_IMAGE_TILING_OPTIMAL;
-    shadow_map_info.image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    shadow_map_info.view.format = vk->device.depth_image_format;
-    shadow_map_info.view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    shadow_map_info.sampler.magFilter = VK_FILTER_NEAREST;
-    shadow_map_info.sampler.minFilter = VK_FILTER_NEAREST;
-    shadow_map_info.sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-    shadow_map_info.sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-    ctk_push(&app->shadow_maps, vtk_create_texture(&shadow_map_info, &vk->device));
 
     // Command Buffers
     app->cmd_bufs.one_time = vtk_allocate_command_buffer(vk->device.logical, vk->graphics_cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
     app->cmd_bufs.render.count = vk->swapchain.image_count;
     vtk_allocate_command_buffers(vk->device.logical, vk->graphics_cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, app->cmd_bufs.render.count, app->cmd_bufs.render.data);
 
+    create_shadow_maps(app, vk);
     load_assets(app, vk);
     create_descriptor_sets(app, vk);
     create_render_passes(app, vk);
@@ -1052,22 +1171,22 @@ static struct scene *create_scene(struct app *app, struct vk_core *vk) {
     };
     cubes[0]->transform->position = { 10.0f, -3.0f, 15.0f };
     cubes[0]->mesh = ctk_at(&app->assets.meshes, "cube");
-    cubes[0]->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "wood");
+    cubes[0]->texture_desc_set = ctk_at(&app->descriptors.sets.textures, "wood");
 
     cubes[1]->transform->position = { 4.0f, 0.0f, 2.0f };
     cubes[1]->mesh = ctk_at(&app->assets.meshes, "cube");
-    cubes[1]->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "wood");
+    cubes[1]->texture_desc_set = ctk_at(&app->descriptors.sets.textures, "wood");
 
     struct entity *floor = push_entity(scene);
     floor->transform->rotation = { -90.0f, 0.0f, 0.0f };
     floor->transform->scale = { 32, 32, 1 };
     floor->mesh = ctk_at(&app->assets.meshes, "quad");
-    floor->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "wood");
+    floor->texture_desc_set = ctk_at(&app->descriptors.sets.textures, "wood");
 
     struct entity *sibenik = push_entity(scene);
     sibenik->transform->position = { 15.0f, -18.0f, 15.0f };
     sibenik->mesh = ctk_at(&app->assets.meshes, "sibenik");
-    sibenik->texture_desc_set = ctk_at(&app->descriptor.sets.textures, "brick");
+    sibenik->texture_desc_set = ctk_at(&app->descriptors.sets.textures, "brick");
 
     struct light *light = push_light(scene);
     light->transform->position = { 8, -4, 15.5f };
@@ -1561,7 +1680,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
 
                 // Light Descriptor Sets
-                struct vtk_descriptor_set_binding light_desc_set_binding = { &app->descriptor.sets.light_ubo, { 0u }, swapchain_img_idx };
+                struct vtk_descriptor_set_binding light_desc_set_binding = { &app->descriptors.sets.light_ubo, { 0u }, swapchain_img_idx };
                 vtk_bind_descriptor_sets(cmd_buf, gp->layout, 0, &light_desc_set_binding, 1);
 
                 for (u32 i = 0; i < scene->entities.count; ++i) {
@@ -1569,7 +1688,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                     struct mesh *mesh = e->mesh;
 
                     // Entity Descriptor Sets
-                    struct vtk_descriptor_set_binding entity_desc_set_binding = { &app->descriptor.sets.entity_model_ubo, { i }, swapchain_img_idx };
+                    struct vtk_descriptor_set_binding entity_desc_set_binding = { &app->descriptors.sets.entity_model_ubo, { i }, swapchain_img_idx };
                     vtk_bind_descriptor_sets(cmd_buf, gp->layout, 1, &entity_desc_set_binding, 1);
 
                     vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
@@ -1608,7 +1727,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 vkCmdPushConstants(cmd_buf, direct_gp->layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct ctk_v3<f32>), &scene->camera.transform.position);
 
                 // Light Descriptor Sets
-                struct vtk_descriptor_set_binding light_desc_set_binding = { &app->descriptor.sets.light_ubo, { 0u }, swapchain_img_idx };
+                struct vtk_descriptor_set_binding light_desc_set_binding = { &app->descriptors.sets.light_ubo, { 0u }, swapchain_img_idx };
                 vtk_bind_descriptor_sets(cmd_buf, direct_gp->layout, 0, &light_desc_set_binding, 1);
 
                 for (u32 i = 0; i < scene->entities.count; ++i) {
@@ -1617,9 +1736,9 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
 
                     // Entity Descriptor Sets
                     struct vtk_descriptor_set_binding entity_desc_set_bindings[] = {
-                        { &app->descriptor.sets.entity_model_ubo, { i }, swapchain_img_idx },
+                        { &app->descriptors.sets.entity_model_ubo, { i }, swapchain_img_idx },
                         { e->texture_desc_set },
-                        { app->descriptor.sets.shadow_maps + 0 },
+                        { &app->descriptors.sets.shadow_maps.directional },
                     };
                     vtk_bind_descriptor_sets(cmd_buf, direct_gp->layout, 1, entity_desc_set_bindings, CTK_ARRAY_COUNT(entity_desc_set_bindings));
 
@@ -1637,8 +1756,8 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 struct mesh *light_diamond = ctk_at(&app->assets.meshes, "light_diamond");
                 for (u32 i = 0; i < scene->lights.count; ++i) {
                     struct vtk_descriptor_set_binding desc_set_bindings[] = {
-                        { &app->descriptor.sets.light_ubo, { i }, swapchain_img_idx },
-                        { &app->descriptor.sets.light_model_ubo, { i }, swapchain_img_idx },
+                        { &app->descriptors.sets.light_ubo, { i }, swapchain_img_idx },
+                        { &app->descriptors.sets.light_model_ubo, { i }, swapchain_img_idx },
                     };
                     vtk_bind_descriptor_sets(cmd_buf, unlit_gp->layout, 0, desc_set_bindings, CTK_ARRAY_COUNT(desc_set_bindings));
                     vkCmdBindVertexBuffers(cmd_buf, 0, 1, &light_diamond->vertex_region.buffer->handle, &light_diamond->vertex_region.offset);
@@ -1671,8 +1790,8 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 struct mesh *fullscreen_quad = ctk_at(&app->assets.meshes, "fullscreen_quad");
                 vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
                 struct vtk_descriptor_set_binding desc_set_bindings[] = {
-                    { app->descriptor.sets.shadow_maps + 0 },
-                    { &app->descriptor.sets.light_ubo, { 0u }, swapchain_img_idx },
+                    { &app->descriptors.sets.shadow_maps.directional },
+                    { &app->descriptors.sets.light_ubo, { 0u }, swapchain_img_idx },
                 };
                 vtk_bind_descriptor_sets(cmd_buf, gp->layout, 0, desc_set_bindings, CTK_ARRAY_COUNT(desc_set_bindings));
                 vkCmdBindVertexBuffers(cmd_buf, 0, 1, &fullscreen_quad->vertex_region.buffer->handle, &fullscreen_quad->vertex_region.offset);
