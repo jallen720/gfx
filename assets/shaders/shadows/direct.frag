@@ -64,9 +64,9 @@ float depth_bias_scale(float frag_depth) {
     return 1 - frag_depth;
 }
 
-float calc_attenuation(float light_distance) {
+float calc_attenuation(float light_dist) {
     // Fatt = 1.0 / (Kc + Kl ∗ d + Kq ∗ d ^ 2)
-    return 1.0 / (1.0 + (light_ubo.linear * light_distance) + (light_ubo.quadratic * pow(light_distance, 2)));
+    return 1.0 / (1.0 + (light_ubo.linear * light_dist) + (light_ubo.quadratic * pow(light_dist, 2)));
 }
 
 void main() {
@@ -81,7 +81,7 @@ void main() {
     // Light Calculations
     float diffuse = max(dot(frag_norm, frag_light_dir), 0.0);
     float shadow = pcf_filter(frag_pos_light_space, depth_bias);
-    float attenuation = calc_attenuation(distance(in_frag_pos, light_ubo.pos));
+    float attenuation = light_ubo.mode == LIGHT_MODE_DIRECTIONAL ? 1 : calc_attenuation(distance(in_frag_pos, light_ubo.pos));
     vec4 light_color = light_ubo.color * (light_ubo.ambient + (shadow * diffuse)) * attenuation;
     vec4 surface_color = texture(tex, in_frag_uv);
     out_color = surface_color * light_color;

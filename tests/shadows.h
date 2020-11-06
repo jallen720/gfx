@@ -1209,7 +1209,6 @@ static glm::mat4 camera_view_space_mtx(struct camera *cam) {
     cam_mtx = glm::rotate(cam_mtx, glm::radians(cam_trans->rotation.x), { 1.0f, 0.0f, 0.0f });
     cam_mtx = glm::rotate(cam_mtx, glm::radians(cam_trans->rotation.y), { 0.0f, 1.0f, 0.0f });
     cam_mtx = glm::rotate(cam_mtx, glm::radians(cam_trans->rotation.z), { 0.0f, 0.0f, 1.0f });
-    cam_mtx = glm::translate(cam_mtx, cam_pos);
     glm::vec3 cam_forward = { cam_mtx[0][2], cam_mtx[1][2], cam_mtx[2][2] };
     glm::mat4 view_mtx = glm::lookAt(cam_pos, cam_pos + cam_forward, { 0.0f, -1.0f, 0.0f });
 
@@ -1258,7 +1257,6 @@ static void update_lights(struct app *app, struct vk_core *vk, struct scene *sce
         view_mtx = glm::rotate(view_mtx, glm::radians(trans->rotation.x), { 1.0f, 0.0f, 0.0f });
         view_mtx = glm::rotate(view_mtx, glm::radians(trans->rotation.y), { 0.0f, 1.0f, 0.0f });
         view_mtx = glm::rotate(view_mtx, glm::radians(trans->rotation.z), { 0.0f, 0.0f, 1.0f });
-        view_mtx = glm::translate(view_mtx, light_pos);
         glm::vec3 light_forward = { view_mtx[0][2], view_mtx[1][2], view_mtx[2][2] };
         view_mtx = glm::lookAt(light_pos, light_pos + light_forward, { 0.0f, -1.0f, 0.0f });
 
