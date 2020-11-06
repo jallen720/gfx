@@ -688,7 +688,7 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
 
         // Attachment Descriptions
         VkAttachmentDescription *depth_attachment = ctk_push(&rp_info.attachment_descriptions);
-        depth_attachment->format = vk->device.depth_image_format;
+        depth_attachment->format = VK_FORMAT_D32_SFLOAT;
         depth_attachment->samples = VK_SAMPLE_COUNT_1_BIT;
         depth_attachment->loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         depth_attachment->storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -928,10 +928,10 @@ static void create_shadow_maps(struct app *app, struct vk_core *vk) {
         info.memory_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
         info.image.extent.width = SHADOW_MAP_SIZE;
         info.image.extent.height = SHADOW_MAP_SIZE;
-        info.image.format = vk->device.depth_image_format;
+        info.image.format = VK_FORMAT_D32_SFLOAT;
         info.image.tiling = VK_IMAGE_TILING_OPTIMAL;
-        info.image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        info.view.format = vk->device.depth_image_format;
+        info.image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        info.view.format = VK_FORMAT_D32_SFLOAT;
         info.view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
         info.sampler.magFilter = VK_FILTER_NEAREST;
         info.sampler.minFilter = VK_FILTER_NEAREST;
@@ -1266,11 +1266,11 @@ static void update_lights(struct app *app, struct vk_core *vk, struct scene *sce
         glm::mat4 proj_mtx(1.0);
         if (ubo->mode == LIGHT_MODE_DIRECTIONAL) {
             f32 near_plane = 1.0f;
-            f32 far_plane = 50.5f;
-            proj_mtx = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
+            f32 far_plane = 60.0f;
+            proj_mtx = glm::ortho(-30.0f, 30.0f, -30.0f, 30.0f, near_plane, far_plane);
             proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
         } else {
-            proj_mtx = glm::perspective(glm::radians(130.0f), 1.0f, 0.1f, 50.0f);
+            proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 50.0f);
             proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
         }
 
@@ -1695,6 +1695,55 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                     vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
                 }
             vkCmdEndRenderPass(cmd_buf);
+            // Transition depth map to transfer source.
+            {
+                VkImageMemoryBarrier img_barrier = {};
+                img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                img_barrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+                img_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                img_barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                img_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                img_barrier.image = app->shadow_maps.directional.handle;
+                img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                img_barrier.subresourceRange.baseMipLevel = 0;
+                img_barrier.subresourceRange.levelCount = 1;
+                img_barrier.subresourceRange.baseArrayLayer = 0;
+                img_barrier.subresourceRange.layerCount = 1;
+                vkCmdPipelineBarrier(cmd_buf,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     0, // Dependency Flags
+                                     0, NULL, // Memory Barriers
+                                     0, NULL, // Buffer Memory Barriers
+                                     1, &img_barrier); // Image Memory Barriers
+            }
+
+            // Transition depth map back to depth attachment.
+            {
+                VkImageMemoryBarrier img_barrier = {};
+                img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                img_barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                img_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                img_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                img_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                img_barrier.image = app->shadow_maps.directional.handle;
+                img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                img_barrier.subresourceRange.baseMipLevel = 0;
+                img_barrier.subresourceRange.levelCount = 1;
+                img_barrier.subresourceRange.baseArrayLayer = 0;
+                img_barrier.subresourceRange.layerCount = 1;
+                vkCmdPipelineBarrier(cmd_buf,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     0, // Dependency Flags
+                                     0, NULL, // Memory Barriers
+                                     0, NULL, // Buffer Memory Barriers
+                                     1, &img_barrier); // Image Memory Barriers
+            }
         }
 #endif
 #if 1
