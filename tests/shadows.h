@@ -209,7 +209,7 @@ static u32 const MAX_LIGHTS = 16;
 static u32 const MAX_MATERIALS = 16;
 static u32 const SHADOW_MAP_SIZE = 4096;
 // static u32 const SHADOW_MAP_SIZE = 8192;
-static VkFormat const OMNI_SHADOW_MAP_FORMAT = VK_FORMAT_R32_SFLOAT; // Image will have color aspect but hold depth data.
+static VkFormat const OMNI_SHADOW_MAP_FORMAT = VK_FORMAT_D32_SFLOAT;//VK_FORMAT_R32_SFLOAT; // Image will have color aspect but hold depth data.
 
 struct app {
     struct vtk_vertex_layout vertex_layout;
@@ -970,7 +970,7 @@ static void create_shadow_maps(struct app *app, struct vk_core *vk) {
         info.view.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
         info.view.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
         info.view.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-        info.view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        info.view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
         info.view.subresourceRange.baseMipLevel = 0;
         info.view.subresourceRange.levelCount = 1;
         info.view.subresourceRange.baseArrayLayer = 0;
@@ -1006,7 +1006,7 @@ static void create_shadow_maps(struct app *app, struct vk_core *vk) {
             img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             img_barrier.image = app->shadow_maps.omni.handle;
-            img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
             img_barrier.subresourceRange.baseMipLevel = 0;
             img_barrier.subresourceRange.levelCount = 1;
             img_barrier.subresourceRange.baseArrayLayer = 0;
@@ -1695,6 +1695,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                     vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
                 }
             vkCmdEndRenderPass(cmd_buf);
+
             // Transition depth map to transfer source.
             {
                 VkImageMemoryBarrier img_barrier = {};
@@ -1720,6 +1721,56 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                                      1, &img_barrier); // Image Memory Barriers
             }
 
+            // Transition omni shadow map to transfer destination.
+            {
+                VkImageMemoryBarrier img_barrier = {};
+                img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                img_barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                img_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                img_barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                img_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                img_barrier.image = app->shadow_maps.omni.handle;
+                img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                img_barrier.subresourceRange.baseMipLevel = 0;
+                img_barrier.subresourceRange.levelCount = 1;
+                img_barrier.subresourceRange.baseArrayLayer = 0;
+                img_barrier.subresourceRange.layerCount = 1;
+                vkCmdPipelineBarrier(cmd_buf,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     0, // Dependency Flags
+                                     0, NULL, // Memory Barriers
+                                     0, NULL, // Buffer Memory Barriers
+                                     1, &img_barrier); // Image Memory Barriers
+            }
+
+            // Copy from directional shadow map to face of omni shadow map.
+            VkImageCopy copy_region = {};
+
+            copy_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            copy_region.srcSubresource.baseArrayLayer = 0;
+            copy_region.srcSubresource.mipLevel = 0;
+            copy_region.srcSubresource.layerCount = 1;
+            copy_region.srcOffset = { 0, 0, 0 };
+
+            copy_region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            copy_region.dstSubresource.baseArrayLayer = 0;
+            copy_region.dstSubresource.mipLevel = 0;
+            copy_region.dstSubresource.layerCount = 1;
+            copy_region.dstOffset = { 0, 0, 0 };
+
+            copy_region.extent.width = SHADOW_MAP_SIZE;
+            copy_region.extent.height = SHADOW_MAP_SIZE;
+            copy_region.extent.depth = 1;
+
+            // Put image copy into command buffer
+            vkCmdCopyImage(cmd_buf,
+                           app->shadow_maps.directional.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           app->shadow_maps.omni.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1, &copy_region);
+
             // Transition depth map back to depth attachment.
             {
                 VkImageMemoryBarrier img_barrier = {};
@@ -1731,6 +1782,31 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                 img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                 img_barrier.image = app->shadow_maps.directional.handle;
+                img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                img_barrier.subresourceRange.baseMipLevel = 0;
+                img_barrier.subresourceRange.levelCount = 1;
+                img_barrier.subresourceRange.baseArrayLayer = 0;
+                img_barrier.subresourceRange.layerCount = 1;
+                vkCmdPipelineBarrier(cmd_buf,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     0, // Dependency Flags
+                                     0, NULL, // Memory Barriers
+                                     0, NULL, // Buffer Memory Barriers
+                                     1, &img_barrier); // Image Memory Barriers
+            }
+
+            // Transition omni shadow map back to shader readonly.
+            {
+                VkImageMemoryBarrier img_barrier = {};
+                img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                img_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                img_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                img_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                img_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                img_barrier.image = app->shadow_maps.omni.handle;
                 img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
                 img_barrier.subresourceRange.baseMipLevel = 0;
                 img_barrier.subresourceRange.levelCount = 1;
