@@ -188,7 +188,7 @@ static struct ctk_v2<f32> const LIGHT_ATTENUATION_CONSTS[] = {
 };
 
 struct light_ubo {
-    alignas(16) glm::mat4 space_mtx;
+    alignas(16) glm::mat4 view_mtxs[6];
     alignas(16) struct ctk_v3<f32> position;
     alignas(16) struct ctk_v3<f32> direction;
     s32 mode;
@@ -823,6 +823,7 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "shadow_frag"));
         ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.light_ubo);
         ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.model_ubo);
+        ctk_push(&info.push_constant_ranges, { VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(u32) });
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
         ctk_push(&info.viewports, { 0, 0, (f32)SHADOW_MAP_SIZE, (f32)SHADOW_MAP_SIZE, 0, 1 });
@@ -1251,30 +1252,42 @@ static void update_lights(struct app *app, struct vk_core *vk, struct scene *sce
         ////////////////////////////////////////////////////////////
         /// Light UBO
         ////////////////////////////////////////////////////////////
-
-        // View Matrix
-        glm::mat4 view_mtx(1.0f);
-        view_mtx = glm::rotate(view_mtx, glm::radians(trans->rotation.x), { 1.0f, 0.0f, 0.0f });
-        view_mtx = glm::rotate(view_mtx, glm::radians(trans->rotation.y), { 0.0f, 1.0f, 0.0f });
-        view_mtx = glm::rotate(view_mtx, glm::radians(trans->rotation.z), { 0.0f, 0.0f, 1.0f });
-        glm::vec3 light_forward = { view_mtx[0][2], view_mtx[1][2], view_mtx[2][2] };
-        view_mtx = glm::lookAt(light_pos, light_pos + light_forward, { 0.0f, -1.0f, 0.0f });
-
-        // Projection Matrix
-        glm::mat4 proj_mtx(1.0);
+        ubo->position = trans->position;
         if (ubo->mode == LIGHT_MODE_DIRECTIONAL) {
+            // View Matrix
+            glm::mat4 view_mtx(1.0f);
+            view_mtx = glm::rotate(view_mtx, glm::radians(trans->rotation.x), { 1.0f, 0.0f, 0.0f });
+            view_mtx = glm::rotate(view_mtx, glm::radians(trans->rotation.y), { 0.0f, 1.0f, 0.0f });
+            view_mtx = glm::rotate(view_mtx, glm::radians(trans->rotation.z), { 0.0f, 0.0f, 1.0f });
+            glm::vec3 light_forward = { view_mtx[0][2], view_mtx[1][2], view_mtx[2][2] };
+            view_mtx = glm::lookAt(light_pos, light_pos + light_forward, { 0.0f, -1.0f, 0.0f });
+
+            // Projection Matrix
             f32 near_plane = 1.0f;
             f32 far_plane = 60.0f;
-            proj_mtx = glm::ortho(-30.0f, 30.0f, -30.0f, 30.0f, near_plane, far_plane);
-            proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
-        } else {
-            proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 50.0f);
-            proj_mtx[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
-        }
+            glm::mat4 proj_mtx = glm::ortho(-30.0f, 30.0f, -30.0f, 30.0f, near_plane, far_plane);
+            proj_mtx[1][1] *= -1;
 
-        ubo->space_mtx = proj_mtx * view_mtx;
-        ubo->direction = { light_forward.x, light_forward.y, light_forward.z };
-        ubo->position = trans->position;
+            ubo->view_mtxs[0] = proj_mtx * view_mtx;
+            ubo->direction = { light_forward.x, light_forward.y, light_forward.z };
+        } else {
+            static glm::vec3 const DIRECTIONS[] = {
+                { 1, 0, 0 },
+                {-1, 0, 0 },
+                { 0,-1, 0 },
+                { 0, 1, 0 },
+                { 0, 0, 1 },
+                { 0, 0,-1 },
+            };
+            glm::mat4 proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 50.0f);
+            proj_mtx[1][1] *= -1;
+            for (u32 i = 0; i < 6; ++i) {
+                glm::vec3 up = i == 2 ? glm::vec3(0, 0, -1) :
+                               i == 3 ? glm::vec3(0, 0, 1) :
+                               glm::vec3(0, -1, 0);
+                ubo->view_mtxs[i] = proj_mtx * glm::lookAt(light_pos, light_pos + DIRECTIONS[i], up);
+            }
+        }
     }
     vtk_write_to_host_region(vk->device.logical, scene->light.ubos.data, ctk_byte_count(&scene->light.ubos), app->uniform_bufs.light_ubos.regions + swapchain_img_idx, 0);
     vtk_write_to_host_region(vk->device.logical, scene->light.model_ubos.data, ctk_byte_count(&scene->light.model_ubos),
@@ -1645,6 +1658,123 @@ static void sync_frame(struct app *app, struct vk_core *vk, u32 swapchain_img_id
     *img_prev_frame = app->frame_sync.curr_frame;
 }
 
+static void render_omni_shadow_map_direction(struct app *app, struct vk_core *vk, struct scene *scene, u32 swapchain_img_idx, VkCommandBuffer cmd_buf, u32 direction_view_mtx_idx) {
+    struct vtk_render_pass *rp = &app->render_passes.shadow;
+
+    VkRect2D render_area = {};
+    render_area.offset.x = 0;
+    render_area.offset.y = 0;
+    render_area.extent.width = SHADOW_MAP_SIZE;
+    render_area.extent.height = SHADOW_MAP_SIZE;
+
+    VkRenderPassBeginInfo rp_begin_info = {};
+    rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rp_begin_info.renderPass = rp->handle;
+    rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
+    rp_begin_info.renderArea = render_area;
+    rp_begin_info.clearValueCount = rp->clear_values.count;
+    rp_begin_info.pClearValues = rp->clear_values.data;
+
+    vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+        struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.shadow;
+        vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
+
+        // Push Constants
+        vkCmdPushConstants(cmd_buf, gp->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(u32), &direction_view_mtx_idx);
+
+        // Light Descriptor Sets
+        struct vtk_descriptor_set_binding light_desc_set_binding = { &app->descriptors.sets.light_ubo, { 0u }, swapchain_img_idx };
+        vtk_bind_descriptor_sets(cmd_buf, gp->layout, 0, &light_desc_set_binding, 1);
+
+        for (u32 i = 0; i < scene->entities.count; ++i) {
+            struct entity *entity = scene->entities + i;
+            struct mesh *mesh = entity->mesh;
+
+            // Entity Descriptor Sets
+            struct vtk_descriptor_set_binding entity_desc_set_binding = { &app->descriptors.sets.entity_model_ubo, { i }, swapchain_img_idx };
+            vtk_bind_descriptor_sets(cmd_buf, gp->layout, 1, &entity_desc_set_binding, 1);
+
+            vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
+            vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
+        }
+    vkCmdEndRenderPass(cmd_buf);
+}
+
+static void copy_omni_shadow_map_face(struct app *app, VkCommandBuffer cmd_buf, u32 face_idx) {
+    // Transition directional shadow map to transfer source.
+    {
+        VkImageMemoryBarrier img_barrier = {};
+        img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        img_barrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        img_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        img_barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        img_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        img_barrier.image = app->shadow_maps.directional.handle;
+        img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        img_barrier.subresourceRange.baseMipLevel = 0;
+        img_barrier.subresourceRange.levelCount = 1;
+        img_barrier.subresourceRange.baseArrayLayer = 0;
+        img_barrier.subresourceRange.layerCount = 1;
+        vkCmdPipelineBarrier(cmd_buf,
+                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                             0, // Dependency Flags
+                             0, NULL, // Memory Barriers
+                             0, NULL, // Buffer Memory Barriers
+                             1, &img_barrier); // Image Memory Barriers
+    }
+
+    // Copy from directional shadow map to face of omni shadow map.
+    VkImageCopy copy_region = {};
+    copy_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    copy_region.srcSubresource.baseArrayLayer = 0;
+    copy_region.srcSubresource.mipLevel = 0;
+    copy_region.srcSubresource.layerCount = 1;
+    copy_region.srcOffset = { 0, 0, 0 };
+    copy_region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    copy_region.dstSubresource.baseArrayLayer = face_idx;
+    copy_region.dstSubresource.mipLevel = 0;
+    copy_region.dstSubresource.layerCount = 1;
+    copy_region.dstOffset = { 0, 0, 0 };
+    copy_region.extent.width = SHADOW_MAP_SIZE;
+    copy_region.extent.height = SHADOW_MAP_SIZE;
+    copy_region.extent.depth = 1;
+
+    // Copy from directional shadow map to omni shadow map face.
+    vkCmdCopyImage(cmd_buf,
+                   app->shadow_maps.directional.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   app->shadow_maps.omni.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   1, &copy_region);
+
+    // Transition directional shadow map back to depth attachment.
+    {
+        VkImageMemoryBarrier img_barrier = {};
+        img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        img_barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        img_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        img_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        img_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        img_barrier.image = app->shadow_maps.directional.handle;
+        img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        img_barrier.subresourceRange.baseMipLevel = 0;
+        img_barrier.subresourceRange.levelCount = 1;
+        img_barrier.subresourceRange.baseArrayLayer = 0;
+        img_barrier.subresourceRange.layerCount = 1;
+        vkCmdPipelineBarrier(cmd_buf,
+                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                             0, // Dependency Flags
+                             0, NULL, // Memory Barriers
+                             0, NULL, // Buffer Memory Barriers
+                             1, &img_barrier); // Image Memory Barriers
+    }
+}
+
 static void record_render_passes(struct app *app, struct vk_core *vk, struct scene *scene, struct ui *ui, u32 swapchain_img_idx) {
     VkCommandBufferBeginInfo cmd_buf_begin_info = {};
     cmd_buf_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1656,69 +1786,6 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
 #if 1
         // Shadow
         {
-            struct vtk_render_pass *rp = &app->render_passes.shadow;
-
-            VkRect2D render_area = {};
-            render_area.offset.x = 0;
-            render_area.offset.y = 0;
-            render_area.extent.width = SHADOW_MAP_SIZE;
-            render_area.extent.height = SHADOW_MAP_SIZE;
-
-            VkRenderPassBeginInfo rp_begin_info = {};
-            rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            rp_begin_info.renderPass = rp->handle;
-            rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
-            rp_begin_info.renderArea = render_area;
-            rp_begin_info.clearValueCount = rp->clear_values.count;
-            rp_begin_info.pClearValues = rp->clear_values.data;
-
-            vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-                struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.shadow;
-                vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
-
-                // Light Descriptor Sets
-                struct vtk_descriptor_set_binding light_desc_set_binding = { &app->descriptors.sets.light_ubo, { 0u }, swapchain_img_idx };
-                vtk_bind_descriptor_sets(cmd_buf, gp->layout, 0, &light_desc_set_binding, 1);
-
-                for (u32 i = 0; i < scene->entities.count; ++i) {
-                    struct entity *entity = scene->entities + i;
-                    struct mesh *mesh = entity->mesh;
-
-                    // Entity Descriptor Sets
-                    struct vtk_descriptor_set_binding entity_desc_set_binding = { &app->descriptors.sets.entity_model_ubo, { i }, swapchain_img_idx };
-                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, 1, &entity_desc_set_binding, 1);
-
-                    vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
-                    vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
-                    vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
-                }
-            vkCmdEndRenderPass(cmd_buf);
-
-            // Transition depth map to transfer source.
-            {
-                VkImageMemoryBarrier img_barrier = {};
-                img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-                img_barrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-                img_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-                img_barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                img_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-                img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                img_barrier.image = app->shadow_maps.directional.handle;
-                img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-                img_barrier.subresourceRange.baseMipLevel = 0;
-                img_barrier.subresourceRange.levelCount = 1;
-                img_barrier.subresourceRange.baseArrayLayer = 0;
-                img_barrier.subresourceRange.layerCount = 1;
-                vkCmdPipelineBarrier(cmd_buf,
-                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                                     0, // Dependency Flags
-                                     0, NULL, // Memory Barriers
-                                     0, NULL, // Buffer Memory Barriers
-                                     1, &img_barrier); // Image Memory Barriers
-            }
-
             // Transition omni shadow map to transfer destination.
             {
                 VkImageMemoryBarrier img_barrier = {};
@@ -1734,7 +1801,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 img_barrier.subresourceRange.baseMipLevel = 0;
                 img_barrier.subresourceRange.levelCount = 1;
                 img_barrier.subresourceRange.baseArrayLayer = 0;
-                img_barrier.subresourceRange.layerCount = 1;
+                img_barrier.subresourceRange.layerCount = 6;
                 vkCmdPipelineBarrier(cmd_buf,
                                      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                                      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
@@ -1744,54 +1811,10 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                                      1, &img_barrier); // Image Memory Barriers
             }
 
-            // Copy from directional shadow map to face of omni shadow map.
-            VkImageCopy copy_region = {};
-
-            copy_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-            copy_region.srcSubresource.baseArrayLayer = 0;
-            copy_region.srcSubresource.mipLevel = 0;
-            copy_region.srcSubresource.layerCount = 1;
-            copy_region.srcOffset = { 0, 0, 0 };
-
-            copy_region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-            copy_region.dstSubresource.baseArrayLayer = 0;
-            copy_region.dstSubresource.mipLevel = 0;
-            copy_region.dstSubresource.layerCount = 1;
-            copy_region.dstOffset = { 0, 0, 0 };
-
-            copy_region.extent.width = SHADOW_MAP_SIZE;
-            copy_region.extent.height = SHADOW_MAP_SIZE;
-            copy_region.extent.depth = 1;
-
-            // Put image copy into command buffer
-            vkCmdCopyImage(cmd_buf,
-                           app->shadow_maps.directional.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           app->shadow_maps.omni.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                           1, &copy_region);
-
-            // Transition depth map back to depth attachment.
-            {
-                VkImageMemoryBarrier img_barrier = {};
-                img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-                img_barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-                img_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-                img_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-                img_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                img_barrier.image = app->shadow_maps.directional.handle;
-                img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-                img_barrier.subresourceRange.baseMipLevel = 0;
-                img_barrier.subresourceRange.levelCount = 1;
-                img_barrier.subresourceRange.baseArrayLayer = 0;
-                img_barrier.subresourceRange.layerCount = 1;
-                vkCmdPipelineBarrier(cmd_buf,
-                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                                     0, // Dependency Flags
-                                     0, NULL, // Memory Barriers
-                                     0, NULL, // Buffer Memory Barriers
-                                     1, &img_barrier); // Image Memory Barriers
+            // Render shadow maps for each direcion and copy to respective omni shadow map face.
+            for (u32 i = 0; i < 6; ++i) {
+                render_omni_shadow_map_direction(app, vk, scene, swapchain_img_idx, cmd_buf, i);
+                copy_omni_shadow_map_face(app, cmd_buf, i);
             }
 
             // Transition omni shadow map back to shader readonly.
@@ -1809,7 +1832,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 img_barrier.subresourceRange.baseMipLevel = 0;
                 img_barrier.subresourceRange.levelCount = 1;
                 img_barrier.subresourceRange.baseArrayLayer = 0;
-                img_barrier.subresourceRange.layerCount = 1;
+                img_barrier.subresourceRange.layerCount = 6;
                 vkCmdPipelineBarrier(cmd_buf,
                                      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                                      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,

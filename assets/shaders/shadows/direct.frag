@@ -5,7 +5,7 @@
 #define LIGHT_MODE_POINT 1
 
 layout (set = 0, binding = 0, std140) uniform u_light_ubo {
-    mat4 space_mtx;
+    mat4 view_mtxs[6];
     vec3 pos;
     vec3 direction;
     int mode;
@@ -36,17 +36,22 @@ layout (location = 0) out vec4 out_color;
 
 float calc_shadow(vec4 frag_pos_light_space, float depth_bias, vec2 offset) {
     float shadow = 1.0;
-    float frag_depth = frag_pos_light_space.z;
-    if (abs(frag_depth) < 1) {
-        float shadow_depth = texture(shadow_map_2d, frag_pos_light_space.st + offset).r;
-        if (frag_pos_light_space.w > 0.0 && shadow_depth < frag_depth - depth_bias)
+    // float frag_depth = frag_pos_light_space.z;
+    vec3 light_to_frag = in_frag_pos - light_ubo.pos;
+    float frag_depth = length(light_to_frag);
+    // if (abs(frag_depth) < 1) {
+        // float shadow_depth = texture(shadow_map_2d, frag_pos_light_space.st + offset).r;
+        float shadow_depth = texture(shadow_map_3d, vec3(light_to_frag.x, -light_to_frag.y, light_to_frag.z)).r * 50;
+        if (/* frag_pos_light_space.w > 0.0 && */ shadow_depth < frag_depth - (depth_bias * 50))
             shadow = 0.0;
-    }
+    // }
+    // out_color = vec4(linearize_depth(texture(shadow_map_3d, vec3(light_to_frag.x, -light_to_frag.y, light_to_frag.z)).r));
     return shadow;
 }
 
 float pcf_filter(vec4 frag_pos_light_space, float depth_bias) {
-    ivec2 tex_dim = textureSize(shadow_map_2d, 0);
+    // ivec2 tex_dim = textureSize(shadow_map_2d, 0);
+    ivec2 tex_dim = textureSize(shadow_map_3d, 0);
     float texel_width = 1 / float(tex_dim.x);
     float texel_height = 1 / float(tex_dim.y);
     float shadow = 0.0;
@@ -70,17 +75,19 @@ float calc_attenuation(float light_dist) {
 }
 
 void main() {
-    float texel_size = 1 / length(textureSize(shadow_map_2d, 0));
+    // float texel_size = 1 / length(textureSize(shadow_map_2d, 0));
+    float texel_size = 1 / length(textureSize(shadow_map_3d, 0));
     vec3 frag_norm = normalize(in_frag_norm);
     vec3 frag_light_dir = normalize(in_frag_light_dir);
     vec4 frag_pos_light_space = in_frag_pos_light_space / in_frag_pos_light_space.w;
-    float bias_scale = depth_bias_scale(frag_pos_light_space.z);
-    float depth_bias = light_ubo.depth_bias * texel_size * bias_scale;
-    float test = texture(shadow_map_3d, vec3(1)).r;
+    // float bias_scale = depth_bias_scale(abs(frag_pos_light_space.z));
+    float depth_bias = light_ubo.depth_bias * texel_size;// * bias_scale;
 
     // Light Calculations
     float diffuse = max(dot(frag_norm, frag_light_dir), 0.0);
-    float shadow = pcf_filter(frag_pos_light_space, depth_bias);
+    // float shadow = pcf_filter(frag_pos_light_space, depth_bias);
+    float shadow = calc_shadow(frag_pos_light_space, depth_bias, vec2(0));
+    // return;
     float attenuation = light_ubo.mode == LIGHT_MODE_DIRECTIONAL ? 1 : calc_attenuation(distance(in_frag_pos, light_ubo.pos));
     vec4 light_color = light_ubo.color * (light_ubo.ambient + (shadow * diffuse)) * attenuation;
     vec4 surface_color = texture(tex, in_frag_uv);
