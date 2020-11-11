@@ -996,7 +996,7 @@ static void create_shadow_maps(struct app *app, struct vk_core *vk) {
 
         app->shadow_maps.omni = vtk_create_texture(&info, &vk->device);
 
-        // Manually transition image omni shadow-map layout as it is not implicitly transitioned by any subpasses.
+        // Manually transition omni shadow-map layout as it is not implicitly transitioned by any subpasses.
         vtk_begin_one_time_command_buffer(app->cmd_bufs.one_time);
             VkImageMemoryBarrier img_barrier = {};
             img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;

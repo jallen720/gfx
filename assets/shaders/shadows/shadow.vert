@@ -21,13 +21,13 @@ layout (set = 1, binding = 0, std140) uniform u_model_ubo {
     mat4 mvp_mtx;
 } model_ubo;
 layout (push_constant) uniform u_push_constants {
-    uint direction_view_mtx_idx;
+    uint light_view_mtx_idx;
 } push_constants;
 layout (location = 0) in vec3 in_vert_pos;
 layout (location = 0) out vec3 out_frag_pos;
 
 void main() {
-    uint view_mtx_idx = light_ubo.mode == LIGHT_MODE_DIRECTIONAL ? 0 : push_constants.direction_view_mtx_idx;
+    uint view_mtx_idx = light_ubo.mode == LIGHT_MODE_DIRECTIONAL ? 0 : push_constants.light_view_mtx_idx;
     out_frag_pos = vec3(model_ubo.model_mtx * vec4(in_vert_pos, 1));
     gl_Position = light_ubo.view_mtxs[view_mtx_idx] * model_ubo.model_mtx * vec4(in_vert_pos, 1);
 }
