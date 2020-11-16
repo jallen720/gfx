@@ -188,11 +188,11 @@ static struct ctk_v2<f32> const LIGHT_ATTENUATION_CONSTS[] = {
 };
 
 struct light_ubo {
-    alignas(16) glm::mat4 view_mtxs[6];
-    alignas(16) struct ctk_v3<f32> position;
-    alignas(16) struct ctk_v3<f32> direction;
+    struct ctk_v4<f32> color;
+    struct ctk_v3<f32> pos;
     s32 mode;
-    alignas(16) struct ctk_v4<f32> color;
+    struct ctk_v3<f32> dir;
+    f32 far_clip;
     s32 depth_bias;
     s32 normal_bias;
     f32 linear;
@@ -1570,6 +1570,7 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
 
             static cstr LIGHT_MODE_NAMES[] = { "directional", "point" };
             enum_dropdown("light_modes", LIGHT_MODE_NAMES, CTK_ARRAY_COUNT(LIGHT_MODE_NAMES), &ubo->mode);
+            ImGui::InputFloat("far_clip", &ubo->far_clip);
             ImGui::InputInt("depth_bias", &ubo->depth_bias);
             ImGui::InputInt("normal_bias", &ubo->normal_bias);
             ImGui::SliderInt("attenuation_index", (s32*)&light->attenuation_index, 0, CTK_ARRAY_COUNT(LIGHT_ATTENUATION_CONSTS) - 1);

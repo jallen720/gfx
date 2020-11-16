@@ -7,7 +7,7 @@
 layout (set = 0, binding = 0, std140) uniform u_light_ubo {
     mat4 view_mtxs[6];
     vec3 pos;
-    vec3 direction;
+    vec3 dir;
     int mode;
     vec4 color;
     int depth_bias;
