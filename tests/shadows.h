@@ -505,7 +505,8 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
         info.pBindings = &binding;
-        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptors.set_layouts.model_ubo), "error creating descriptor set layout");
+        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptors.set_layouts.model_ubo),
+                            "error creating descriptor set layout");
     }
 
     // light_ubo
@@ -515,7 +516,8 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
         info.pBindings = &binding;
-        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptors.set_layouts.light_ubo), "error creating descriptor set layout");
+        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptors.set_layouts.light_ubo),
+                            "error creating descriptor set layout");
     }
 
     // sampler
@@ -525,21 +527,25 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
         info.pBindings = &binding;
-        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptors.set_layouts.sampler), "error creating descriptor set layout");
+        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptors.set_layouts.sampler),
+                            "error creating descriptor set layout");
     }
 
     // Sets
 
     // entity_model_ubo
-    vtk_allocate_descriptor_set(&app->descriptors.sets.entity_model_ubo, app->descriptors.set_layouts.model_ubo, vk->swapchain.image_count, vk->device.logical, app->descriptors.pool);
+    vtk_allocate_descriptor_set(&app->descriptors.sets.entity_model_ubo, app->descriptors.set_layouts.model_ubo, vk->swapchain.image_count, vk->device.logical,
+                                app->descriptors.pool);
     ctk_push(&app->descriptors.sets.entity_model_ubo.dynamic_offsets, app->uniform_bufs.entity_model_ubos.element_size);
 
     // light_model_ubo
-    vtk_allocate_descriptor_set(&app->descriptors.sets.light_model_ubo, app->descriptors.set_layouts.model_ubo, vk->swapchain.image_count, vk->device.logical, app->descriptors.pool);
+    vtk_allocate_descriptor_set(&app->descriptors.sets.light_model_ubo, app->descriptors.set_layouts.model_ubo, vk->swapchain.image_count, vk->device.logical,
+                                app->descriptors.pool);
     ctk_push(&app->descriptors.sets.light_model_ubo.dynamic_offsets, app->uniform_bufs.light_model_ubos.element_size);
 
     // light_ubo
-    vtk_allocate_descriptor_set(&app->descriptors.sets.light_ubo, app->descriptors.set_layouts.light_ubo, vk->swapchain.image_count, vk->device.logical, app->descriptors.pool);
+    vtk_allocate_descriptor_set(&app->descriptors.sets.light_ubo, app->descriptors.set_layouts.light_ubo, vk->swapchain.image_count, vk->device.logical,
+                                app->descriptors.pool);
     ctk_push(&app->descriptors.sets.light_ubo.dynamic_offsets, app->uniform_bufs.light_ubos.element_size);
 
     // textures
@@ -1033,9 +1039,12 @@ static struct app *create_app(struct vk_core *vk) {
     vtk_push_vertex_attribute(&app->vertex_layout, "uv", 2);
 
     // Uniform Buffers
-    app->uniform_bufs.entity_model_ubos = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_ENTITIES, sizeof(struct model_ubo), vk->swapchain.image_count);
-    app->uniform_bufs.light_model_ubos = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_LIGHTS, sizeof(struct model_ubo), vk->swapchain.image_count);
-    app->uniform_bufs.light_ubos = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_LIGHTS, sizeof(struct light_ubo), vk->swapchain.image_count);
+    app->uniform_bufs.entity_model_ubos = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_ENTITIES,
+                                                                    sizeof(struct model_ubo), vk->swapchain.image_count);
+    app->uniform_bufs.light_model_ubos = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_LIGHTS,
+                                                                   sizeof(struct model_ubo), vk->swapchain.image_count);
+    app->uniform_bufs.light_ubos = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_LIGHTS,
+                                                             sizeof(struct light_ubo), vk->swapchain.image_count);
 
     // Attachment Images
     struct vtk_image_info depth_image_info = vtk_default_image_info();
@@ -1052,7 +1061,8 @@ static struct app *create_app(struct vk_core *vk) {
     // Command Buffers
     app->cmd_bufs.one_time = vtk_allocate_command_buffer(vk->device.logical, vk->graphics_cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
     app->cmd_bufs.render.count = vk->swapchain.image_count;
-    vtk_allocate_command_buffers(vk->device.logical, vk->graphics_cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, app->cmd_bufs.render.count, app->cmd_bufs.render.data);
+    vtk_allocate_command_buffers(vk->device.logical, vk->graphics_cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, app->cmd_bufs.render.count,
+                                 app->cmd_bufs.render.data);
 
     create_shadow_maps(app, vk);
     load_assets(app, vk);
@@ -1290,7 +1300,8 @@ static void update_lights(struct app *app, struct vk_core *vk, struct scene *sce
         //     }
         // }
     }
-    vtk_write_to_host_region(vk->device.logical, scene->light.ubos.data, ctk_byte_count(&scene->light.ubos), app->uniform_bufs.light_ubos.regions + swapchain_img_idx, 0);
+    vtk_write_to_host_region(vk->device.logical, scene->light.ubos.data, ctk_byte_count(&scene->light.ubos),
+                             app->uniform_bufs.light_ubos.regions + swapchain_img_idx, 0);
     vtk_write_to_host_region(vk->device.logical, scene->light.model_ubos.data, ctk_byte_count(&scene->light.model_ubos),
                              app->uniform_bufs.light_model_ubos.regions + swapchain_img_idx, 0);
 }
@@ -1659,7 +1670,8 @@ static void sync_frame(struct app *app, struct vk_core *vk, u32 swapchain_img_id
     *img_prev_frame = app->frame_sync.curr_frame;
 }
 
-static void render_omni_shadow_map_direction(struct app *app, struct vk_core *vk, struct scene *scene, u32 swapchain_img_idx, VkCommandBuffer cmd_buf, u32 direction_view_mtx_idx) {
+static void render_omni_shadow_map_direction(struct app *app, struct vk_core *vk, struct scene *scene, u32 swapchain_img_idx, VkCommandBuffer cmd_buf,
+                                             u32 direction_view_mtx_idx) {
     struct vtk_render_pass *rp = &app->render_passes.shadow;
 
     VkRect2D render_area = {};
