@@ -427,6 +427,8 @@ static void load_assets(struct app *app, struct vk_core *vk) {
     struct shader_load_info shader_load_infos[] = {
         { "shadow_vert", "assets/shaders/shadows/shadow.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
         { "shadow_frag", "assets/shaders/shadows/shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
+        { "new_shadow_vert", "assets/shaders/shadows/new_shadow.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
+        { "new_shadow_frag", "assets/shaders/shadows/new_shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
         { "direct_vert", "assets/shaders/shadows/direct.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
         { "direct_frag", "assets/shaders/shadows/direct.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
         { "unlit_vert", "assets/shaders/shadows/unlit.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
@@ -473,7 +475,7 @@ static void allocate_shadow_map_descriptor_set(struct app *app, struct vk_core *
     VkDescriptorSetAllocateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     info.descriptorPool = app->descriptors.pool;
-    info.descriptorSetCount = ds->instances.count;
+    info.descriptorSetCount = 1;
     info.pSetLayouts = &app->descriptors.set_layouts.sampler;
     vtk_validate_result(vkAllocateDescriptorSets(vk->device.logical, &info, ds->instances.data), "failed to allocate descriptor sets");
 }
@@ -884,7 +886,6 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "fullscreen_texture_vert"));
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "fullscreen_texture_frag"));
         ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.sampler);
-        ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.light_ubo);
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_inputs, { 0, 1, ctk_at(&app->vertex_layout.attributes, "uv") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
@@ -1557,8 +1558,8 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
             struct light_ubo *ubo = scene->light.ubos + ui->light_idx;
             transform_control(scene->light.transforms + ui->light_idx);
 
-            static cstr LIGHT_MODES[] = { "directional", "point" };
-            enum_dropdown("light_modes", LIGHT_MODES, CTK_ARRAY_COUNT(LIGHT_MODES), &ubo->mode);
+            static cstr LIGHT_MODE_NAMES[] = { "directional", "point" };
+            enum_dropdown("light_modes", LIGHT_MODE_NAMES, CTK_ARRAY_COUNT(LIGHT_MODE_NAMES), &ubo->mode);
             ImGui::InputInt("depth_bias", &ubo->depth_bias);
             ImGui::InputInt("normal_bias", &ubo->normal_bias);
             ImGui::SliderInt("attenuation_index", (s32*)&light->attenuation_index, 0, CTK_ARRAY_COUNT(LIGHT_ATTENUATION_CONSTS) - 1);
@@ -1938,7 +1939,6 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
                 struct vtk_descriptor_set_binding desc_set_bindings[] = {
                     { &app->descriptors.sets.shadow_maps.directional },
-                    { &app->descriptors.sets.light_ubo, { 0u }, swapchain_img_idx },
                 };
                 vtk_bind_descriptor_sets(cmd_buf, gp->layout, 0, desc_set_bindings, CTK_ARRAY_COUNT(desc_set_bindings));
                 vkCmdBindVertexBuffers(cmd_buf, 0, 1, &fullscreen_quad->vertex_region.buffer->handle, &fullscreen_quad->vertex_region.offset);
