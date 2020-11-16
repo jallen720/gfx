@@ -888,8 +888,9 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_inputs, { 0, 1, ctk_at(&app->vertex_layout.attributes, "uv") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
-        ctk_push(&info.viewports, { 1600 - 410, 10, 400, 400, 0, 1 });
-        ctk_push(&info.scissors, { 1600 - 410, 10, 400, 400 });
+        static u32 const SIZE = 800;
+        ctk_push(&info.viewports, { 1600 - (SIZE + 10), 10, SIZE, SIZE, 0, 1 });
+        ctk_push(&info.scissors, { 1600 - (SIZE + 10), 10, SIZE, SIZE });
         ctk_push(&info.color_blend_attachment_states, vtk_default_color_blend_attachment_state());
         app->graphics_pipelines.fullscreen_texture = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.fullscreen_texture, 0, &info);
     }
