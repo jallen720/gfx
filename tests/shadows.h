@@ -207,9 +207,9 @@ struct material_ubo {
 static u32 const MAX_ENTITIES = 1024;
 static u32 const MAX_LIGHTS = 16;
 static u32 const MAX_MATERIALS = 16;
-static u32 const SHADOW_MAP_SIZE = 4096;
-// static u32 const SHADOW_MAP_SIZE = 8192;
-static VkFormat const OMNI_SHADOW_MAP_FORMAT = VK_FORMAT_D32_SFLOAT;//VK_FORMAT_R32_SFLOAT; // Image will have color aspect but hold depth data.
+static u32 const SHADOW_MAP_SIZE_SML = 1024;
+static u32 const SHADOW_MAP_SIZE_MED = 2048;
+static u32 const SHADOW_MAP_SIZE_LRG = 4096;
 
 struct app {
     struct vtk_vertex_layout vertex_layout;
@@ -219,16 +219,17 @@ struct app {
         struct vtk_uniform_buffer light_ubos;
     } uniform_bufs;
     struct {
-        struct vtk_image depth;
-    } attachment_imgs;
-    struct {
-        struct vtk_texture directional;
-        struct vtk_texture omni;
-    } shadow_maps;
-    struct {
         VkCommandBuffer one_time;
         struct ctk_array<VkCommandBuffer, 4> render;
     } cmd_bufs;
+    struct {
+        struct vtk_image depth;
+        struct vtk_image shadow_map;
+    } attachment_imgs;
+    struct {
+        // struct vtk_texture directional;
+        struct vtk_texture omni;
+    } shadow_maps;
     struct {
         struct ctk_map<struct vtk_shader, 16> shaders;
         struct ctk_map<struct vtk_texture, 16> textures;
@@ -247,14 +248,14 @@ struct app {
             struct vtk_descriptor_set light_ubo;
             struct ctk_map<struct vtk_descriptor_set, 16> textures;
             struct {
-                struct vtk_descriptor_set directional;
+                // struct vtk_descriptor_set directional;
                 struct vtk_descriptor_set omni;
             } shadow_maps;
         } sets;
     } descriptors;
     struct {
-        struct vtk_render_pass direct;
         struct vtk_render_pass shadow;
+        struct vtk_render_pass direct;
         struct vtk_render_pass fullscreen_texture;
     } render_passes;
     struct {
@@ -562,7 +563,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
     }
 
     // shadow_maps
-    allocate_shadow_map_descriptor_set(app, vk, &app->descriptors.sets.shadow_maps.directional);
+    // allocate_shadow_map_descriptor_set(app, vk, &app->descriptors.sets.shadow_maps.directional);
     allocate_shadow_map_descriptor_set(app, vk, &app->descriptors.sets.shadow_maps.omni);
 
     // Updates
@@ -646,25 +647,25 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
 
     // shadow_maps
 
-    // directional
-    {
-        struct vtk_texture *shadow_map = &app->shadow_maps.directional;
+    // // directional
+    // {
+    //     struct vtk_texture *shadow_map = &app->shadow_maps.directional;
 
-        VkDescriptorImageInfo *info = ctk_push(&img_infos);
-        info->sampler = shadow_map->sampler;
-        info->imageView = shadow_map->view;
-        info->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    //     VkDescriptorImageInfo *info = ctk_push(&img_infos);
+    //     info->sampler = shadow_map->sampler;
+    //     info->imageView = shadow_map->view;
+    //     info->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-        struct vtk_descriptor_set *ds = &app->descriptors.sets.shadow_maps.directional;
-        VkWriteDescriptorSet *write = ctk_push(&writes);
-        write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write->dstSet = ds->instances[0];
-        write->dstBinding = 0;
-        write->dstArrayElement = 0;
-        write->descriptorCount = 1;
-        write->descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write->pImageInfo = info;
-    }
+    //     struct vtk_descriptor_set *ds = &app->descriptors.sets.shadow_maps.directional;
+    //     VkWriteDescriptorSet *write = ctk_push(&writes);
+    //     write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    //     write->dstSet = ds->instances[0];
+    //     write->dstBinding = 0;
+    //     write->dstArrayElement = 0;
+    //     write->descriptorCount = 1;
+    //     write->descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    //     write->pImageInfo = info;
+    // }
 
     // omni
     {
@@ -690,7 +691,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
 }
 
 static void create_render_passes(struct app *app, struct vk_core *vk) {
-    // Shadow
+    // Perspective Shadow
     {
         struct vtk_render_pass_info rp_info = {};
 
@@ -703,7 +704,7 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
         depth_attachment->stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         depth_attachment->stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         depth_attachment->initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        depth_attachment->finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        depth_attachment->finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         ctk_push(&rp_info.clear_values, { 1.0f, 0 });
 
         // Subpass Infos
@@ -725,9 +726,9 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
         // Framebuffer Infos
         for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
             struct vtk_framebuffer_info *fb_info = ctk_push(&rp_info.framebuffer_infos);
-            ctk_push(&fb_info->attachments, app->shadow_maps.directional.view);
-            fb_info->extent.width = SHADOW_MAP_SIZE;
-            fb_info->extent.height = SHADOW_MAP_SIZE;
+            ctk_push(&fb_info->attachments, app->attachment_imgs.shadow_map.view);
+            fb_info->extent.width = SHADOW_MAP_SIZE_LRG;
+            fb_info->extent.height = SHADOW_MAP_SIZE_LRG;
             fb_info->layers = 1;
         }
 
@@ -833,9 +834,9 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         ctk_push(&info.push_constant_ranges, { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 80 });
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
         ctk_push(&info.vertex_input_binding_descriptions, { 0, app->vertex_layout.size, VK_VERTEX_INPUT_RATE_VERTEX });
-        ctk_push(&info.viewports, { 0, 0, (f32)SHADOW_MAP_SIZE, (f32)SHADOW_MAP_SIZE, 0, 1 });
-        ctk_push(&info.scissors, { 0, 0, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE });
         ctk_push(&info.color_blend_attachment_states, vtk_default_color_blend_attachment_state());
+        ctk_push(&info.dynamic_states, VK_DYNAMIC_STATE_VIEWPORT);
+        ctk_push(&info.dynamic_states, VK_DYNAMIC_STATE_SCISSOR);
         info.depth_stencil_state.depthTestEnable = VK_TRUE;
         info.depth_stencil_state.depthWriteEnable = VK_TRUE;
         info.depth_stencil_state.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
@@ -850,7 +851,7 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.light_ubo);
         ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.model_ubo);
         ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.sampler);
-        ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.sampler);
+        // ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.sampler);
         ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.sampler);
         ctk_push(&info.push_constant_ranges, { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct ctk_v3<f32>) });
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
@@ -929,24 +930,54 @@ static void init_frame_sync(struct app *app, struct vk_core *vk) {
         app->frame_sync.img_prev_frame[i] = CTK_U32_MAX;
 }
 
-static void create_shadow_maps(struct app *app, struct vk_core *vk) {
-    // Directional
+static void create_attachment_images(struct app *app, struct vk_core *vk) {
+    // Depth
     {
-        struct vtk_texture_info info = vtk_default_texture_info();
+        struct vtk_image_info info = vtk_default_image_info();
         info.memory_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-        info.image.extent.width = SHADOW_MAP_SIZE;
-        info.image.extent.height = SHADOW_MAP_SIZE;
+        info.image.extent.width = vk->swapchain.extent.width;
+        info.image.extent.height = vk->swapchain.extent.height;
+        info.image.format = vk->device.depth_image_format;
+        info.image.tiling = VK_IMAGE_TILING_OPTIMAL;
+        info.image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        info.view.format = vk->device.depth_image_format;
+        info.view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        app->attachment_imgs.depth = vtk_create_image(&info, &vk->device);
+    }
+
+    // Shadow Map
+    {
+        struct vtk_image_info info = vtk_default_image_info();
+        info.memory_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+        info.image.extent.width = SHADOW_MAP_SIZE_LRG;
+        info.image.extent.height = SHADOW_MAP_SIZE_LRG;
         info.image.format = VK_FORMAT_D32_SFLOAT;
         info.image.tiling = VK_IMAGE_TILING_OPTIMAL;
-        info.image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        info.image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         info.view.format = VK_FORMAT_D32_SFLOAT;
         info.view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        info.sampler.magFilter = VK_FILTER_NEAREST;
-        info.sampler.minFilter = VK_FILTER_NEAREST;
-        info.sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-        info.sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-        app->shadow_maps.directional = vtk_create_texture(&info, &vk->device);
+        app->attachment_imgs.shadow_map = vtk_create_image(&info, &vk->device);
     }
+}
+
+static void create_shadow_maps(struct app *app, struct vk_core *vk) {
+    // // Directional
+    // {
+    //     struct vtk_texture_info info = vtk_default_texture_info();
+    //     info.memory_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    //     info.image.extent.width = SHADOW_MAP_SIZE;
+    //     info.image.extent.height = SHADOW_MAP_SIZE;
+    //     info.image.format = VK_FORMAT_D32_SFLOAT;
+    //     info.image.tiling = VK_IMAGE_TILING_OPTIMAL;
+    //     info.image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    //     info.view.format = VK_FORMAT_D32_SFLOAT;
+    //     info.view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    //     info.sampler.magFilter = VK_FILTER_NEAREST;
+    //     info.sampler.minFilter = VK_FILTER_NEAREST;
+    //     info.sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    //     info.sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    //     app->shadow_maps.directional = vtk_create_texture(&info, &vk->device);
+    // }
 
     // Omni
     {
@@ -956,9 +987,9 @@ static void create_shadow_maps(struct app *app, struct vk_core *vk) {
         info.image.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         info.image.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
         info.image.imageType = VK_IMAGE_TYPE_2D;
-        info.image.format = OMNI_SHADOW_MAP_FORMAT;
-        info.image.extent.width = SHADOW_MAP_SIZE;
-        info.image.extent.height = SHADOW_MAP_SIZE;
+        info.image.format = VK_FORMAT_D32_SFLOAT;
+        info.image.extent.width = SHADOW_MAP_SIZE_SML;
+        info.image.extent.height = SHADOW_MAP_SIZE_SML;
         info.image.extent.depth = 1;
         info.image.mipLevels = 1;
         info.image.arrayLayers = 6;
@@ -973,7 +1004,7 @@ static void create_shadow_maps(struct app *app, struct vk_core *vk) {
         info.view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         info.view.flags = 0;
         info.view.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-        info.view.format = OMNI_SHADOW_MAP_FORMAT;
+        info.view.format = VK_FORMAT_D32_SFLOAT;
         info.view.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
         info.view.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
         info.view.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -1046,24 +1077,13 @@ static struct app *create_app(struct vk_core *vk) {
     app->uniform_bufs.light_ubos = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_LIGHTS,
                                                              sizeof(struct light_ubo), vk->swapchain.image_count);
 
-    // Attachment Images
-    struct vtk_image_info depth_image_info = vtk_default_image_info();
-    depth_image_info.memory_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    depth_image_info.image.extent.width = vk->swapchain.extent.width;
-    depth_image_info.image.extent.height = vk->swapchain.extent.height;
-    depth_image_info.image.format = vk->device.depth_image_format;
-    depth_image_info.image.tiling = VK_IMAGE_TILING_OPTIMAL;
-    depth_image_info.image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    depth_image_info.view.format = vk->device.depth_image_format;
-    depth_image_info.view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    app->attachment_imgs.depth = vtk_create_image(&depth_image_info, &vk->device);
-
     // Command Buffers
     app->cmd_bufs.one_time = vtk_allocate_command_buffer(vk->device.logical, vk->graphics_cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
     app->cmd_bufs.render.count = vk->swapchain.image_count;
     vtk_allocate_command_buffers(vk->device.logical, vk->graphics_cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, app->cmd_bufs.render.count,
                                  app->cmd_bufs.render.data);
 
+    create_attachment_images(app, vk);
     create_shadow_maps(app, vk);
     load_assets(app, vk);
     create_descriptor_sets(app, vk);
@@ -1671,123 +1691,123 @@ static void sync_frame(struct app *app, struct vk_core *vk, u32 swapchain_img_id
     *img_prev_frame = app->frame_sync.curr_frame;
 }
 
-static void render_omni_shadow_map_direction(struct app *app, struct vk_core *vk, struct scene *scene, u32 swapchain_img_idx, VkCommandBuffer cmd_buf,
-                                             u32 direction_view_mtx_idx) {
-    struct vtk_render_pass *rp = &app->render_passes.shadow;
+// static void render_omni_shadow_map_direction(struct app *app, struct vk_core *vk, struct scene *scene, u32 swapchain_img_idx, VkCommandBuffer cmd_buf,
+//                                              u32 direction_view_mtx_idx) {
+//     struct vtk_render_pass *rp = &app->render_passes.shadow;
 
-    VkRect2D render_area = {};
-    render_area.offset.x = 0;
-    render_area.offset.y = 0;
-    render_area.extent.width = SHADOW_MAP_SIZE;
-    render_area.extent.height = SHADOW_MAP_SIZE;
+//     VkRect2D render_area = {};
+//     render_area.offset.x = 0;
+//     render_area.offset.y = 0;
+//     render_area.extent.width = SHADOW_MAP_SIZE_LRG;
+//     render_area.extent.height = SHADOW_MAP_SIZE_LRG;
 
-    VkRenderPassBeginInfo rp_begin_info = {};
-    rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rp_begin_info.renderPass = rp->handle;
-    rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
-    rp_begin_info.renderArea = render_area;
-    rp_begin_info.clearValueCount = rp->clear_values.count;
-    rp_begin_info.pClearValues = rp->clear_values.data;
+//     VkRenderPassBeginInfo rp_begin_info = {};
+//     rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+//     rp_begin_info.renderPass = rp->handle;
+//     rp_begin_info.framebuffer = rp->framebuffers[swapchain_img_idx];
+//     rp_begin_info.renderArea = render_area;
+//     rp_begin_info.clearValueCount = rp->clear_values.count;
+//     rp_begin_info.pClearValues = rp->clear_values.data;
 
-    vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-        struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.perspective_shadow;
-        vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
+//     vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+//         struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.perspective_shadow;
+//         vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
 
-        // Push Constants
-        vkCmdPushConstants(cmd_buf, gp->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(u32), &direction_view_mtx_idx);
+//         // Push Constants
+//         vkCmdPushConstants(cmd_buf, gp->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(u32), &direction_view_mtx_idx);
 
-        // Light Descriptor Sets
-        struct vtk_descriptor_set_binding light_desc_set_binding = { &app->descriptors.sets.light_ubo, { 0u }, swapchain_img_idx };
-        vtk_bind_descriptor_sets(cmd_buf, gp->layout, 0, &light_desc_set_binding, 1);
+//         // Light Descriptor Sets
+//         struct vtk_descriptor_set_binding light_desc_set_binding = { &app->descriptors.sets.light_ubo, { 0u }, swapchain_img_idx };
+//         vtk_bind_descriptor_sets(cmd_buf, gp->layout, 0, &light_desc_set_binding, 1);
 
-        for (u32 i = 0; i < scene->entities.count; ++i) {
-            struct entity *entity = scene->entities + i;
-            struct mesh *mesh = entity->mesh;
+//         for (u32 i = 0; i < scene->entities.count; ++i) {
+//             struct entity *entity = scene->entities + i;
+//             struct mesh *mesh = entity->mesh;
 
-            // Entity Descriptor Sets
-            struct vtk_descriptor_set_binding entity_desc_set_binding = { &app->descriptors.sets.entity_model_ubo, { i }, swapchain_img_idx };
-            vtk_bind_descriptor_sets(cmd_buf, gp->layout, 1, &entity_desc_set_binding, 1);
+//             // Entity Descriptor Sets
+//             struct vtk_descriptor_set_binding entity_desc_set_binding = { &app->descriptors.sets.entity_model_ubo, { i }, swapchain_img_idx };
+//             vtk_bind_descriptor_sets(cmd_buf, gp->layout, 1, &entity_desc_set_binding, 1);
 
-            vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
-            vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
-        }
-    vkCmdEndRenderPass(cmd_buf);
-}
+//             vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
+//             vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
+//             vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
+//         }
+//     vkCmdEndRenderPass(cmd_buf);
+// }
 
-static void copy_omni_shadow_map_face(struct app *app, VkCommandBuffer cmd_buf, u32 face_idx) {
-    // Transition directional shadow map to transfer source.
-    {
-        VkImageMemoryBarrier img_barrier = {};
-        img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        img_barrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        img_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        img_barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        img_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        img_barrier.image = app->shadow_maps.directional.handle;
-        img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        img_barrier.subresourceRange.baseMipLevel = 0;
-        img_barrier.subresourceRange.levelCount = 1;
-        img_barrier.subresourceRange.baseArrayLayer = 0;
-        img_barrier.subresourceRange.layerCount = 1;
-        vkCmdPipelineBarrier(cmd_buf,
-                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                             0, // Dependency Flags
-                             0, NULL, // Memory Barriers
-                             0, NULL, // Buffer Memory Barriers
-                             1, &img_barrier); // Image Memory Barriers
-    }
+// static void copy_omni_shadow_map_face(struct app *app, VkCommandBuffer cmd_buf, u32 face_idx) {
+//     // Transition directional shadow map to transfer source.
+//     {
+//         VkImageMemoryBarrier img_barrier = {};
+//         img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+//         img_barrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+//         img_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+//         img_barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+//         img_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+//         img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+//         img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+//         img_barrier.image = app->shadow_maps.directional.handle;
+//         img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+//         img_barrier.subresourceRange.baseMipLevel = 0;
+//         img_barrier.subresourceRange.levelCount = 1;
+//         img_barrier.subresourceRange.baseArrayLayer = 0;
+//         img_barrier.subresourceRange.layerCount = 1;
+//         vkCmdPipelineBarrier(cmd_buf,
+//                              VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+//                              VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+//                              0, // Dependency Flags
+//                              0, NULL, // Memory Barriers
+//                              0, NULL, // Buffer Memory Barriers
+//                              1, &img_barrier); // Image Memory Barriers
+//     }
 
-    // Copy from directional shadow map to face of omni shadow map.
-    VkImageCopy copy_region = {};
-    copy_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    copy_region.srcSubresource.baseArrayLayer = 0;
-    copy_region.srcSubresource.mipLevel = 0;
-    copy_region.srcSubresource.layerCount = 1;
-    copy_region.srcOffset = { 0, 0, 0 };
-    copy_region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    copy_region.dstSubresource.baseArrayLayer = face_idx;
-    copy_region.dstSubresource.mipLevel = 0;
-    copy_region.dstSubresource.layerCount = 1;
-    copy_region.dstOffset = { 0, 0, 0 };
-    copy_region.extent.width = SHADOW_MAP_SIZE;
-    copy_region.extent.height = SHADOW_MAP_SIZE;
-    copy_region.extent.depth = 1;
+//     // Copy from directional shadow map to face of omni shadow map.
+//     VkImageCopy copy_region = {};
+//     copy_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+//     copy_region.srcSubresource.baseArrayLayer = 0;
+//     copy_region.srcSubresource.mipLevel = 0;
+//     copy_region.srcSubresource.layerCount = 1;
+//     copy_region.srcOffset = { 0, 0, 0 };
+//     copy_region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+//     copy_region.dstSubresource.baseArrayLayer = face_idx;
+//     copy_region.dstSubresource.mipLevel = 0;
+//     copy_region.dstSubresource.layerCount = 1;
+//     copy_region.dstOffset = { 0, 0, 0 };
+//     copy_region.extent.width = SHADOW_MAP_SIZE_LRG;
+//     copy_region.extent.height = SHADOW_MAP_SIZE_LRG;
+//     copy_region.extent.depth = 1;
 
-    // Copy from directional shadow map to omni shadow map face.
-    vkCmdCopyImage(cmd_buf,
-                   app->shadow_maps.directional.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                   app->shadow_maps.omni.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                   1, &copy_region);
+//     // Copy from directional shadow map to omni shadow map face.
+//     vkCmdCopyImage(cmd_buf,
+//                    app->shadow_maps.directional.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+//                    app->shadow_maps.omni.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+//                    1, &copy_region);
 
-    // Transition directional shadow map back to depth attachment.
-    {
-        VkImageMemoryBarrier img_barrier = {};
-        img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        img_barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        img_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        img_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        img_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        img_barrier.image = app->shadow_maps.directional.handle;
-        img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        img_barrier.subresourceRange.baseMipLevel = 0;
-        img_barrier.subresourceRange.levelCount = 1;
-        img_barrier.subresourceRange.baseArrayLayer = 0;
-        img_barrier.subresourceRange.layerCount = 1;
-        vkCmdPipelineBarrier(cmd_buf,
-                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                             0, // Dependency Flags
-                             0, NULL, // Memory Barriers
-                             0, NULL, // Buffer Memory Barriers
-                             1, &img_barrier); // Image Memory Barriers
-    }
-}
+//     // Transition directional shadow map back to depth attachment.
+//     {
+//         VkImageMemoryBarrier img_barrier = {};
+//         img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+//         img_barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+//         img_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+//         img_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+//         img_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+//         img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+//         img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+//         img_barrier.image = app->shadow_maps.directional.handle;
+//         img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+//         img_barrier.subresourceRange.baseMipLevel = 0;
+//         img_barrier.subresourceRange.levelCount = 1;
+//         img_barrier.subresourceRange.baseArrayLayer = 0;
+//         img_barrier.subresourceRange.layerCount = 1;
+//         vkCmdPipelineBarrier(cmd_buf,
+//                              VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+//                              VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+//                              0, // Dependency Flags
+//                              0, NULL, // Memory Barriers
+//                              0, NULL, // Buffer Memory Barriers
+//                              1, &img_barrier); // Image Memory Barriers
+//     }
+// }
 
 static void record_render_passes(struct app *app, struct vk_core *vk, struct scene *scene, struct ui *ui, u32 swapchain_img_idx) {
     VkCommandBufferBeginInfo cmd_buf_begin_info = {};
@@ -1800,24 +1820,14 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
 #if 1
         // Shadow
         {
-            // Calculate Light Matrix
-            struct light *light = scene->lights + 0;
-            float near_clip = 0.1f;
-            float far_clip = 50.0f;
-            glm::vec3 light_pos = { light->transform->position.x, light->transform->position.y, light->transform->position.z };
-            glm::mat4 view_mtx = glm::lookAt(light_pos, light_pos + glm::vec3({ 1, 0, 0 }), { 0, -1, 0 });
-            glm::mat4 proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, near_clip, far_clip);
-            proj_mtx[1][1] *= -1;
-            glm::mat4 light_mtx = proj_mtx * view_mtx;
-
-            // Render Shadow Map
+            // Render Shadows
             struct vtk_render_pass *rp = &app->render_passes.shadow;
 
             VkRect2D render_area = {};
             render_area.offset.x = 0;
             render_area.offset.y = 0;
-            render_area.extent.width = SHADOW_MAP_SIZE;
-            render_area.extent.height = SHADOW_MAP_SIZE;
+            render_area.extent.width = SHADOW_MAP_SIZE_LRG;
+            render_area.extent.height = SHADOW_MAP_SIZE_LRG;
 
             VkRenderPassBeginInfo rp_begin_info = {};
             rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1828,44 +1838,93 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
             rp_begin_info.pClearValues = rp->clear_values.data;
 
             vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-                struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.perspective_shadow;
-                vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
+                // Render Perspective Shadows
+                for (u32 face_idx = 0; face_idx < 6; ++face_idx) {
+                    struct vtk_graphics_pipeline *gp = &app->graphics_pipelines.perspective_shadow;
+                    vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gp->handle);
 
-                // Push Constants
-                vkCmdPushConstants(cmd_buf, gp->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 64, &light_mtx);
-                vkCmdPushConstants(cmd_buf, gp->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 64, 12, &light_pos);
-                vkCmdPushConstants(cmd_buf, gp->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 76, 4, &far_clip);
+                    // Viewport / Scissor
+                    u32 face_x = face_idx % 4;
+                    u32 face_y = face_idx / 4;
 
-                for (u32 i = 0; i < scene->entities.count; ++i) {
-                    struct entity *entity = scene->entities + i;
-                    struct mesh *mesh = entity->mesh;
+                    VkViewport viewport = {};
+                    viewport.x = (f32)SHADOW_MAP_SIZE_SML * face_x;
+                    viewport.y = (f32)SHADOW_MAP_SIZE_SML * face_y;
+                    viewport.width = (f32)SHADOW_MAP_SIZE_SML;
+                    viewport.height = (f32)SHADOW_MAP_SIZE_SML;
+                    viewport.minDepth = 0;
+                    viewport.maxDepth = 1;
 
-                    // Entity Descriptor Sets
-                    struct vtk_descriptor_set_binding entity_desc_set_binding = { &app->descriptors.sets.entity_model_ubo, { i }, swapchain_img_idx };
-                    vtk_bind_descriptor_sets(cmd_buf, gp->layout, 0, &entity_desc_set_binding, 1);
+                    VkRect2D scissor = {};
+                    scissor.offset.x = viewport.x;
+                    scissor.offset.y = viewport.y;
+                    scissor.extent.width = SHADOW_MAP_SIZE_SML;
+                    scissor.extent.height = SHADOW_MAP_SIZE_SML;
 
-                    vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
-                    vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
-                    vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
+                    vkCmdSetViewport(cmd_buf, 0, 1, &viewport);
+                    vkCmdSetScissor(cmd_buf, 0, 1, &scissor);
+
+                    // Push Constants
+                    static glm::vec3 const DIRECTIONS[] = {
+                        { 1, 0, 0 },
+                        {-1, 0, 0 },
+                        { 0,-1, 0 },
+                        { 0, 1, 0 },
+                        { 0, 0, 1 },
+                        { 0, 0,-1 },
+                    };
+                    static glm::vec3 const UP_VECTORS[] = {
+                        { 0,-1, 0 },
+                        { 0,-1, 0 },
+                        { 0, 0,-1 },
+                        { 0, 0, 1 },
+                        { 0,-1, 0 },
+                        { 0,-1, 0 },
+                    };
+                    struct light *light = scene->lights + 0;
+                    float near_clip = 0.1f;
+                    float far_clip = 50.0f;
+                    glm::vec3 light_pos = { light->transform->position.x, light->transform->position.y, light->transform->position.z };
+                    glm::mat4 view_mtx = glm::lookAt(light_pos, light_pos + DIRECTIONS[face_idx], UP_VECTORS[face_idx]);
+                    glm::mat4 proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, near_clip, far_clip);
+                    proj_mtx[1][1] *= -1;
+                    glm::mat4 light_mtx = proj_mtx * view_mtx;
+                    vkCmdPushConstants(cmd_buf, gp->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 64, &light_mtx);
+                    vkCmdPushConstants(cmd_buf, gp->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 64, 12, &light_pos);
+                    vkCmdPushConstants(cmd_buf, gp->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 76, 4, &far_clip);
+
+                    // Render Entities
+                    for (u32 entity_idx = 0; entity_idx < scene->entities.count; ++entity_idx) {
+                        struct entity *entity = scene->entities + entity_idx;
+                        struct mesh *mesh = entity->mesh;
+
+                        // Entity Descriptor Sets
+                        struct vtk_descriptor_set_binding entity_desc_set_binding = { &app->descriptors.sets.entity_model_ubo, { entity_idx }, swapchain_img_idx };
+                        vtk_bind_descriptor_sets(cmd_buf, gp->layout, 0, &entity_desc_set_binding, 1);
+
+                        vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region.buffer->handle, &mesh->vertex_region.offset);
+                        vkCmdBindIndexBuffer(cmd_buf, mesh->index_region.buffer->handle, mesh->index_region.offset, VK_INDEX_TYPE_UINT32);
+                        vkCmdDrawIndexed(cmd_buf, mesh->indexes.count, 1, 0, 0, 0);
+                    }
                 }
             vkCmdEndRenderPass(cmd_buf);
 
-            // // Transition omni shadow map to transfer destination.
+            // // Transition output shadow map to transfer source.
             // {
             //     VkImageMemoryBarrier img_barrier = {};
             //     img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            //     img_barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            //     img_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            //     img_barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            //     img_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            //     img_barrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            //     img_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            //     img_barrier.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            //     img_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
             //     img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             //     img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            //     img_barrier.image = app->shadow_maps.omni.handle;
+            //     img_barrier.image = app->attachment_imgs.shadow_map.handle;
             //     img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
             //     img_barrier.subresourceRange.baseMipLevel = 0;
             //     img_barrier.subresourceRange.levelCount = 1;
             //     img_barrier.subresourceRange.baseArrayLayer = 0;
-            //     img_barrier.subresourceRange.layerCount = 6;
+            //     img_barrier.subresourceRange.layerCount = 1;
             //     vkCmdPipelineBarrier(cmd_buf,
             //                          VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
             //                          VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
@@ -1875,28 +1934,76 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
             //                          1, &img_barrier); // Image Memory Barriers
             // }
 
-            // // Render shadow maps for each direcion and copy to respective omni shadow map face.
-            // for (u32 i = 0; i < 6; ++i) {
-            //     render_omni_shadow_map_direction(app, vk, scene, swapchain_img_idx, cmd_buf, i);
-            //     copy_omni_shadow_map_face(app, cmd_buf, i);
-            // }
+            // Transition omni shadow map to transfer destination.
+            {
+                VkImageMemoryBarrier img_barrier = {};
+                img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                img_barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                img_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                img_barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                img_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                img_barrier.image = app->shadow_maps.omni.handle;
+                img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                img_barrier.subresourceRange.baseMipLevel = 0;
+                img_barrier.subresourceRange.levelCount = 1;
+                img_barrier.subresourceRange.baseArrayLayer = 0;
+                img_barrier.subresourceRange.layerCount = 6;
+                vkCmdPipelineBarrier(cmd_buf,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     0, // Dependency Flags
+                                     0, NULL, // Memory Barriers
+                                     0, NULL, // Buffer Memory Barriers
+                                     1, &img_barrier); // Image Memory Barriers
+            }
 
-            // // Transition omni shadow map back to shader readonly.
+            // Copy regions from output shadow map to omni shadow map array layers representing each direction.
+            struct ctk_array<VkImageCopy, 6> copies = {};
+            for (u32 face_idx = 0; face_idx < 6; ++face_idx) {
+                VkImageCopy *copy = ctk_push(&copies);
+                u32 face_x = face_idx % 4;
+                u32 face_y = face_idx / 4;
+
+                // Copy from directional shadow map to face of omni shadow map.
+                copy->srcSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                copy->srcSubresource.baseArrayLayer = 0;
+                copy->srcSubresource.mipLevel = 0;
+                copy->srcSubresource.layerCount = 1;
+                copy->srcOffset = { (s32)(SHADOW_MAP_SIZE_SML * face_x), (s32)(SHADOW_MAP_SIZE_SML * face_y), 0 };
+                copy->dstSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                copy->dstSubresource.baseArrayLayer = face_idx;
+                copy->dstSubresource.mipLevel = 0;
+                copy->dstSubresource.layerCount = 1;
+                copy->dstOffset = { 0, 0, 0 };
+                copy->extent.width = SHADOW_MAP_SIZE_SML;
+                copy->extent.height = SHADOW_MAP_SIZE_SML;
+                copy->extent.depth = 1;
+
+                // Copy from directional shadow map to omni shadow map face.
+                vkCmdCopyImage(cmd_buf,
+                               app->attachment_imgs.shadow_map.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               app->shadow_maps.omni.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               copies.count, copies.data);
+            }
+
+            // // Transition output shadow map back to depth attachment.
             // {
             //     VkImageMemoryBarrier img_barrier = {};
             //     img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            //     img_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            //     img_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            //     img_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            //     img_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            //     img_barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            //     img_barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            //     img_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            //     img_barrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
             //     img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             //     img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            //     img_barrier.image = app->shadow_maps.omni.handle;
+            //     img_barrier.image = app->attachment_imgs.shadow_map.handle;
             //     img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
             //     img_barrier.subresourceRange.baseMipLevel = 0;
             //     img_barrier.subresourceRange.levelCount = 1;
             //     img_barrier.subresourceRange.baseArrayLayer = 0;
-            //     img_barrier.subresourceRange.layerCount = 6;
+            //     img_barrier.subresourceRange.layerCount = 1;
             //     vkCmdPipelineBarrier(cmd_buf,
             //                          VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
             //                          VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
@@ -1905,6 +2012,31 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
             //                          0, NULL, // Buffer Memory Barriers
             //                          1, &img_barrier); // Image Memory Barriers
             // }
+
+            // Transition omni shadow map back to shader readonly.
+            {
+                VkImageMemoryBarrier img_barrier = {};
+                img_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                img_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                img_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                img_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                img_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                img_barrier.image = app->shadow_maps.omni.handle;
+                img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                img_barrier.subresourceRange.baseMipLevel = 0;
+                img_barrier.subresourceRange.levelCount = 1;
+                img_barrier.subresourceRange.baseArrayLayer = 0;
+                img_barrier.subresourceRange.layerCount = 6;
+                vkCmdPipelineBarrier(cmd_buf,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     0, // Dependency Flags
+                                     0, NULL, // Memory Barriers
+                                     0, NULL, // Buffer Memory Barriers
+                                     1, &img_barrier); // Image Memory Barriers
+            }
         }
 #endif
 #if 1
@@ -1947,7 +2079,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                     struct vtk_descriptor_set_binding entity_desc_set_bindings[] = {
                         { &app->descriptors.sets.entity_model_ubo, { i }, swapchain_img_idx },
                         { entity->texture_desc_set },
-                        { &app->descriptors.sets.shadow_maps.directional },
+                        // { &app->descriptors.sets.shadow_maps.directional },
                         { &app->descriptors.sets.shadow_maps.omni },
                     };
                     vtk_bind_descriptor_sets(cmd_buf, direct_gp->layout, 1, entity_desc_set_bindings, CTK_ARRAY_COUNT(entity_desc_set_bindings));
@@ -1977,7 +2109,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
             vkCmdEndRenderPass(cmd_buf);
         }
 #endif
-#if 1
+#if 0
         // Fullscreen Texture
         {
             struct vtk_render_pass *rp = &app->render_passes.fullscreen_texture;

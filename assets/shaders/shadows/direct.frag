@@ -5,11 +5,11 @@
 #define LIGHT_MODE_POINT 1
 
 layout (set = 0, binding = 0, std140) uniform u_light_ubo {
-    mat4 view_mtxs[6];
-    vec3 pos;
-    vec3 dir;
-    int mode;
     vec4 color;
+    vec3 pos;
+    int mode;
+    vec3 dir;
+    float far_clip;
     int depth_bias;
     int normal_bias;
     float linear;
@@ -20,8 +20,8 @@ layout (set = 0, binding = 0, std140) uniform u_light_ubo {
 //     uint shine_exponent;
 // } material;
 layout (set = 2, binding = 0) uniform sampler2D tex;
-layout (set = 3, binding = 0) uniform sampler2D shadow_map_2d;
-layout (set = 4, binding = 0) uniform samplerCube shadow_map_3d;
+layout (set = 3, binding = 0) uniform samplerCube shadow_map_3d;
+// layout (set = 3, binding = 0) uniform sampler2D shadow_map_2d;
 layout (push_constant) uniform u_push_constants {
     vec3 view_pos;
 } push_constants;
