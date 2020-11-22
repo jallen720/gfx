@@ -499,8 +499,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
 
     // Layouts
 
-    // model_ubo
-    {
+    /* model_ubo */ {
         VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT };
         VkDescriptorSetLayoutCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -510,9 +509,8 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
                             "error creating descriptor set layout");
     }
 
-    // light_ubo
-    {
         VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT };
+    /* omni_light_ubo */ {
         VkDescriptorSetLayoutCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
@@ -521,8 +519,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
                             "error creating descriptor set layout");
     }
 
-    // sampler
-    {
+    /* sampler */ {
         VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT };
         VkDescriptorSetLayoutCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -667,7 +664,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
     //     write->pImageInfo = info;
     // }
 
-    // omni
+    /* shadow_maps.omni */ {
     {
         struct vtk_texture *shadow_map = &app->shadow_maps.omni;
 
@@ -691,8 +688,7 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
 }
 
 static void create_render_passes(struct app *app, struct vk_core *vk) {
-    // Perspective Shadow
-    {
+    /* Perspective Shadow */ {
         struct vtk_render_pass_info rp_info = {};
 
         // Attachment Descriptions
@@ -735,8 +731,7 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
         app->render_passes.shadow = vtk_create_render_pass(vk->device.logical, vk->graphics_cmd_pool, &rp_info);
     }
 
-    // Direct
-    {
+    /* Direct */ {
         struct vtk_render_pass_info rp_info = {};
 
         // Attachment Descriptions
@@ -789,8 +784,7 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
         app->render_passes.direct = vtk_create_render_pass(vk->device.logical, vk->graphics_cmd_pool, &rp_info);
     }
 
-    // Fullscreen Texture
-    {
+    /* Fullscreen Texture */ {
         struct vtk_render_pass_info rp_info = {};
 
         // Attachment Descriptions
@@ -825,8 +819,7 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
 }
 
 static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
-    // Perspective Shadow
-    {
+    /* Perspective Shadow */ {
         struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "perspective_shadow_vert"));
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "perspective_shadow_frag"));
@@ -843,8 +836,7 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         app->graphics_pipelines.perspective_shadow = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.shadow, 0, &info);
     }
 
-    // Direct
-    {
+    /* Direct */ {
         struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "direct_vert"));
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "direct_frag"));
@@ -867,8 +859,7 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         app->graphics_pipelines.direct = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.direct, 0, &info);
     }
 
-    // Marker
-    {
+    /* Marker */ {
         struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "marker_vert"));
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "marker_frag"));
@@ -885,8 +876,7 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         app->graphics_pipelines.marker = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.direct, 0, &info);
     }
 
-    // Fullscreen Texture
-    {
+    /* Fullscreen Texture */ {
         struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "fullscreen_texture_vert"));
         ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "fullscreen_texture_frag"));
@@ -930,8 +920,7 @@ static void init_frame_sync(struct app *app, struct vk_core *vk) {
 }
 
 static void create_attachment_images(struct app *app, struct vk_core *vk) {
-    // Depth
-    {
+    /* Depth */ {
         struct vtk_image_info info = vtk_default_image_info();
         info.memory_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
         info.image.extent.width = vk->swapchain.extent.width;
@@ -944,8 +933,7 @@ static void create_attachment_images(struct app *app, struct vk_core *vk) {
         app->attachment_imgs.depth = vtk_create_image(&info, &vk->device);
     }
 
-    // Shadow Map
-    {
+    /* Shadow Map */ {
         struct vtk_image_info info = vtk_default_image_info();
         info.memory_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
         info.image.extent.width = SHADOW_MAP_SIZE_LRG;
@@ -978,8 +966,7 @@ static void create_shadow_maps(struct app *app, struct vk_core *vk) {
     //     app->shadow_maps.directional = vtk_create_texture(&info, &vk->device);
     // }
 
-    // Omni
-    {
+    /* Omni */ {
         struct vtk_texture_info info = {};
         info.memory_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
@@ -1817,8 +1804,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
     VkCommandBuffer cmd_buf = app->cmd_bufs.render[swapchain_img_idx];
     vtk_validate_result(vkBeginCommandBuffer(cmd_buf, &cmd_buf_begin_info), "failed to begin recording command buffer");
 #if 1
-        // Shadow
-        {
+        /* Shadow */ {
             struct vtk_render_pass *rp = &app->render_passes.shadow;
 
             VkRect2D render_area = {};
@@ -2038,8 +2024,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
         }
 #endif
 #if 1
-        // Direct
-        {
+        /* Direct */ {
             struct vtk_render_pass *rp = &app->render_passes.direct;
 
             VkRect2D render_area = {};
@@ -2108,8 +2093,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
         }
 #endif
 #if 0
-        // Fullscreen Texture
-        {
+        /* Fullscreen Texture */ {
             struct vtk_render_pass *rp = &app->render_passes.fullscreen_texture;
 
             VkRect2D render_area = {};
@@ -2140,8 +2124,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
         }
 #endif
 #if 1
-        // UI
-        {
+        /* UI */ {
             struct vtk_render_pass *rp = &ui->render_pass;
             ImGui::Render();
 
@@ -2167,8 +2150,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
 }
 
 static void submit_command_buffers(struct app *app, struct vk_core *vk, u32 swapchain_img_idx) {
-    // Render
-    {
+    /* Render */ {
         VkCommandBuffer cmd_bufs[] = {
             app->cmd_bufs.render[swapchain_img_idx],
         };
