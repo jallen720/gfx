@@ -6,42 +6,38 @@ const { homedir } = require("os");
 const SHADER_DIRECTORY = join(__dirname, "assets", "shaders");
 const GLSLC = join(homedir(), "dev", "libs", "VulkanSDK", "1.1.130.0", "Bin32", "glslc.exe");
 
-function get_directory_entities(Directory) {
-    const DirectoryEntities = readdirSync(Directory, { withFileTypes: true });
+function get_dir_ents(dir) {
+    let dir_ents = readdirSync(dir, { withFileTypes: true });
     return {
-        Files: DirectoryEntities.filter(DirectoryEntity => DirectoryEntity.isFile()).map(File => File.name),
-        Subdirectories:
-            DirectoryEntities
-                .filter(DirectoryEntity => DirectoryEntity.isDirectory())
-                .map(Subdirectory => join(Directory, Subdirectory.name)),
+        files: dir_ents.filter(dir_ent => dir_ent.isFile()).map(file => file.name),
+        subdirs: dir_ents.filter(dir_ent => dir_ent.isDirectory()).map(Subdirectory => join(dir, Subdirectory.name)),
     };
 }
 
 // Clear all SPIR-V shaders.
-function clear_spirv_files(Directory) {
-    const DirectoryEntities = get_directory_entities(Directory);
-    DirectoryEntities.Files
-        .filter(File => File.endsWith(".spv"))
-        .map(SPIRVFile => join(Directory, SPIRVFile))
-        .forEach(SPIRVFilePath => unlinkSync(SPIRVFilePath));
-    DirectoryEntities.Subdirectories.map(clear_spirv_files);
+function clear_spirv_files(dir) {
+    let dir_ents = get_dir_ents(dir);
+    dir_ents.files
+        .filter(file => file.endsWith(".spv"))
+        .map(spirv_file => join(dir, spirv_file))
+        .forEach(spirv_file_path => unlinkSync(spirv_file_path));
+    dir_ents.subdirs.map(clear_spirv_files);
 }
 
 // Compile new SPIR-V shaders.
-function process_directory(Directory) {
-    const DirectoryEntities = get_directory_entities(Directory);
-    DirectoryEntities.Files
-        .map(ShaderSource => ({ ShaderSource: join(Directory, ShaderSource), Output: join(Directory, `${ShaderSource}.spv`) }))
-        .forEach(CommandData => {
-            const COMMAND = `"${GLSLC}" "${CommandData.ShaderSource}" -o "${CommandData.Output}"`;
-            exec(COMMAND, (Error, Stdout, Stderr) => {
-                console.log(COMMAND);
-                if(Error) {
-                    console.error(`\x1b[31m${Error.message}\x1b[0m`);
-                }
+function process_directory(dir) {
+    let dir_ents = get_dir_ents(dir);
+    dir_ents.files
+        .map(shader_src => ({ shader_src: join(dir, shader_src), output: join(dir, `${shader_src}.spv`) }))
+        .forEach(cmd_data => {
+            let cmd = `"${GLSLC}" "${cmd_data.shader_src}" -o "${cmd_data.output}"`;
+            exec(cmd, (err, stdout, stderr) => {
+                console.log(cmd);
+                if (err)
+                    console.error(`\x1b[31m${err.message}\x1b[0m`);
             });
         });
-    DirectoryEntities.Subdirectories.map(process_directory);
+    dir_ents.subdirs.map(process_directory);
 }
 
 clear_spirv_files(SHADER_DIRECTORY);
