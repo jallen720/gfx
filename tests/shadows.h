@@ -261,7 +261,7 @@ struct app {
     struct {
         struct vtk_graphics_pipeline perspective_shadow;
         struct vtk_graphics_pipeline direct;
-        struct vtk_graphics_pipeline unlit;
+        struct vtk_graphics_pipeline marker;
         struct vtk_graphics_pipeline fullscreen_texture;
     } graphics_pipelines;
     struct {
@@ -432,8 +432,8 @@ static void load_assets(struct app *app, struct vk_core *vk) {
         { "perspective_shadow_frag", "assets/shaders/shadows/perspective_shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
         { "direct_vert", "assets/shaders/shadows/direct.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
         { "direct_frag", "assets/shaders/shadows/direct.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
-        { "unlit_vert", "assets/shaders/shadows/unlit.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
-        { "unlit_frag", "assets/shaders/shadows/unlit.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
+        { "marker_vert", "assets/shaders/shadows/marker.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
+        { "marker_frag", "assets/shaders/shadows/marker.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
         { "fullscreen_texture_vert", "assets/shaders/shadows/fullscreen_texture.vert.spv", VK_SHADER_STAGE_VERTEX_BIT },
         { "fullscreen_texture_frag", "assets/shaders/shadows/fullscreen_texture.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT },
     };
@@ -867,12 +867,11 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         app->graphics_pipelines.direct = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.direct, 0, &info);
     }
 
-    // Unlit
+    // Marker
     {
         struct vtk_graphics_pipeline_info info = vtk_default_graphics_pipeline_info();
-        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "unlit_vert"));
-        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "unlit_frag"));
-        ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.light_ubo);
+        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "marker_vert"));
+        ctk_push(&info.shaders, ctk_at(&app->assets.shaders, "marker_frag"));
         ctk_push(&info.descriptor_set_layouts, app->descriptors.set_layouts.model_ubo);
         ctk_push(&info.push_constant_ranges, { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct ctk_v4<f32>) });
         ctk_push(&info.vertex_inputs, { 0, 0, ctk_at(&app->vertex_layout.attributes, "position") });
@@ -883,7 +882,7 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         info.depth_stencil_state.depthTestEnable = VK_TRUE;
         info.depth_stencil_state.depthWriteEnable = VK_TRUE;
         info.depth_stencil_state.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-        app->graphics_pipelines.unlit = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.direct, 0, &info);
+        app->graphics_pipelines.marker = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.direct, 0, &info);
     }
 
     // Fullscreen Texture
@@ -1820,7 +1819,6 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
 #if 1
         // Shadow
         {
-            // Render Shadows
             struct vtk_render_pass *rp = &app->render_passes.shadow;
 
             VkRect2D render_area = {};
@@ -2092,16 +2090,16 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 ////////////////////////////////////////////////////////////
                 /// Render Lights
                 ////////////////////////////////////////////////////////////
-                struct vtk_graphics_pipeline *unlit_gp = &app->graphics_pipelines.unlit;
-                vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, unlit_gp->handle);
+                struct vtk_graphics_pipeline *marker_gp = &app->graphics_pipelines.marker;
+                vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, marker_gp->handle);
 
                 struct mesh *light_diamond = ctk_at(&app->assets.meshes, "light_diamond");
                 for (u32 i = 0; i < scene->lights.count; ++i) {
+                    vkCmdPushConstants(cmd_buf, marker_gp->layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct ctk_v3<f32>), &scene->lights.ubos[i].color);
                     struct vtk_descriptor_set_binding desc_set_bindings[] = {
-                        { &app->descriptors.sets.light_ubo, { i }, swapchain_img_idx },
                         { &app->descriptors.sets.light_model_ubo, { i }, swapchain_img_idx },
                     };
-                    vtk_bind_descriptor_sets(cmd_buf, unlit_gp->layout, 0, desc_set_bindings, CTK_ARRAY_COUNT(desc_set_bindings));
+                    vtk_bind_descriptor_sets(cmd_buf, marker_gp->layout, 0, desc_set_bindings, CTK_ARRAY_COUNT(desc_set_bindings));
                     vkCmdBindVertexBuffers(cmd_buf, 0, 1, &light_diamond->vertex_region.buffer->handle, &light_diamond->vertex_region.offset);
                     vkCmdBindIndexBuffer(cmd_buf, light_diamond->index_region.buffer->handle, light_diamond->index_region.offset, VK_INDEX_TYPE_UINT32);
                     vkCmdDrawIndexed(cmd_buf, light_diamond->indexes.count, 1, 0, 0, 0);
