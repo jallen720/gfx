@@ -1208,20 +1208,27 @@ static struct scene *create_scene(struct app *app, struct vk_core *vk) {
     sibenik->mesh = ctk_at(&app->assets.meshes, "sibenik");
     sibenik->texture_desc_set = ctk_at(&app->descriptors.sets.textures, "brick");
 
-    struct omni_light *omni_lights[2] = {};
+    struct omni_light *omni_lights[3] = {};
     omni_lights[0] = push_omni_light(scene);
     omni_lights[0]->transform->position = { 8, -4, 15.5f };
     omni_lights[0]->transform->rotation = { 0.0f, 0.0f, 0.0f };
     omni_lights[0]->transform->scale = { 0.1f, 0.1f, 0.1f };
     omni_lights[0]->ubo->depth_bias = 1;
-    omni_lights[0]->attenuation_index = 8;
+    omni_lights[0]->attenuation_index = 3;
 
     omni_lights[1] = push_omni_light(scene);
     omni_lights[1]->transform->position = { 12, -8, 15.5f };
     omni_lights[1]->transform->rotation = { 0.0f, 0.0f, 0.0f };
     omni_lights[1]->transform->scale = { 0.1f, 0.1f, 0.1f };
     omni_lights[1]->ubo->depth_bias = 1;
-    omni_lights[1]->attenuation_index = 8;
+    omni_lights[1]->attenuation_index = 3;
+
+    omni_lights[2] = push_omni_light(scene);
+    omni_lights[2]->transform->position = { 12, -8, 20.5f };
+    omni_lights[2]->transform->rotation = { 0.0f, 0.0f, 0.0f };
+    omni_lights[2]->transform->scale = { 0.1f, 0.1f, 0.1f };
+    omni_lights[2]->ubo->depth_bias = 1;
+    omni_lights[2]->attenuation_index = 3;
 
     struct material *mat = push_material(scene, "test");
     mat->ubo->shine_exponent = 2;

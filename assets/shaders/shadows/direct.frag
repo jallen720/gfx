@@ -53,7 +53,7 @@ float calc_attenuation(s_omni_light_ubo omni_light_ubo, float light_dist) {
 void main() {
     vec3 frag_norm = normalize(in_frag_norm);
     float texel_size = 1 / length(textureSize(shadow_map_3d[0], 0));
-    vec4 surface_color = vec4(1);//texture(tex, in_frag_uv);
+    vec4 surface_color = texture(tex, in_frag_uv);
     vec3 light_color = vec3(0);
     for (uint light_idx = 0; light_idx < lights.count; ++light_idx) {
         s_omni_light_ubo omni_light_ubo = lights.omni_light_ubos[light_idx];
