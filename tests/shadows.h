@@ -536,27 +536,19 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
     ctk_push(&app->descriptors.sets.entity_model_ubo.dynamic_offsets, app->uniform_bufs.entity_model_ubos.element_size);
 
     // omni_light_model_ubo
-    vtk_allocate_descriptor_set(&app->descriptors.sets.omni_light_model_ubo, app->descriptors.set_layouts.model_ubo, vk->swapchain.image_count, vk->device.logical,
-                                app->descriptors.pool);
+    vtk_allocate_descriptor_set(&app->descriptors.sets.omni_light_model_ubo, app->descriptors.set_layouts.model_ubo, vk->swapchain.image_count,
+                                vk->device.logical, app->descriptors.pool);
     ctk_push(&app->descriptors.sets.omni_light_model_ubo.dynamic_offsets, app->uniform_bufs.omni_light_model_ubos.element_size);
 
     // omni_light_ubo
-    vtk_allocate_descriptor_set(&app->descriptors.sets.omni_light_ubo, app->descriptors.set_layouts.omni_light_ubo, vk->swapchain.image_count, vk->device.logical,
-                                app->descriptors.pool);
+    vtk_allocate_descriptor_set(&app->descriptors.sets.omni_light_ubo, app->descriptors.set_layouts.omni_light_ubo, vk->swapchain.image_count,
+                                vk->device.logical, app->descriptors.pool);
     // ctk_push(&app->descriptors.sets.omni_light_ubo.dynamic_offsets, app->uniform_bufs.omni_light_ubos.element_size);
 
     // textures
-    CTK_TODO("use vtk_allocate_descriptor_set()?")
     for (u32 i = 0; i < app->assets.textures.count; ++i) {
         struct vtk_descriptor_set *ds = ctk_push(&app->descriptors.sets.textures, app->assets.textures.keys[i]);
-        ds->instances.count = 1;
-
-        VkDescriptorSetAllocateInfo info = {};
-        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        info.descriptorPool = app->descriptors.pool;
-        info.descriptorSetCount = ds->instances.count;
-        info.pSetLayouts = &app->descriptors.set_layouts.sampler;
-        vtk_validate_result(vkAllocateDescriptorSets(vk->device.logical, &info, ds->instances.data + 0), "failed to allocate descriptor sets");
+        vtk_allocate_descriptor_set(ds, app->descriptors.set_layouts.sampler, 1, vk->device.logical, app->descriptors.pool);
     }
 
     /* omni_shadow_map_samplers */ {
