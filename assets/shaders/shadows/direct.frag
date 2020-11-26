@@ -7,10 +7,12 @@ struct s_omni_light_ubo {
     vec4 color;
     vec3 pos;
     int depth_bias;
+    int normal_bias;
     float far_clip;
     float linear;
     float quadratic;
     float ambient;
+    bool on;
 };
 
 layout (set = 0, binding = 0, std140) uniform u_lights {
@@ -31,14 +33,28 @@ layout (location = 2) in vec2 in_frag_uv;
 
 layout (location = 0) out vec4 out_color;
 
-float calc_shadow(s_omni_light_ubo omni_light_ubo, samplerCube shadow_map_3d, float depth_bias, vec2 offset) {
+float calc_shadow(s_omni_light_ubo omni_light_ubo, samplerCube shadow_map_3d, vec3 biased_frag_pos, float depth_bias) {
     float shadow = 1.0;
-    vec3 light_to_frag = in_frag_pos - omni_light_ubo.pos;
-    float frag_depth = length(light_to_frag) / omni_light_ubo.far_clip;
+    vec3 light_to_frag = biased_frag_pos - omni_light_ubo.pos;
+    float frag_depth = length(light_to_frag);
+#if 1
+    float samples = 4.0;
+    float offset = 0.1;
+    for (float x = -offset; x < offset; x += offset / (samples * 0.5))
+    for (float y = -offset; y < offset; y += offset / (samples * 0.5))
+    for (float z = -offset; z < offset; z += offset / (samples * 0.5)) {
+        float shadow_depth = texture(shadow_map_3d, vec3(light_to_frag.x, -light_to_frag.y, light_to_frag.z) + vec3(x, y, z)).r;
+        if (frag_depth - (depth_bias * omni_light_ubo.far_clip) > (shadow_depth * omni_light_ubo.far_clip))
+            shadow += 1.0;
+    }
+    shadow /= (samples * samples * samples);
+    return 1 - shadow;
+#else
     float shadow_depth = texture(shadow_map_3d, vec3(light_to_frag.x, -light_to_frag.y, light_to_frag.z)).r;
-    if (/* frag_pos_light_space.w > 0.0 && */ shadow_depth < frag_depth - depth_bias)
+    if (frag_depth - (depth_bias * omni_light_ubo.far_clip) > (shadow_depth * omni_light_ubo.far_clip))
         shadow = 0.0;
     return shadow;
+#endif
 }
 
 float depth_bias_scale(float frag_depth) {
@@ -53,21 +69,31 @@ float calc_attenuation(s_omni_light_ubo omni_light_ubo, float light_dist) {
 void main() {
     vec3 frag_norm = normalize(in_frag_norm);
     float texel_size = 1 / length(textureSize(shadow_map_3d[0], 0));
+#if 0
     vec4 surface_color = texture(tex, in_frag_uv);
+#else
+    vec4 surface_color = vec4(1);
+#endif
     vec3 light_color = vec3(0);
+    uint light_count = 0;
     for (uint light_idx = 0; light_idx < lights.count; ++light_idx) {
         s_omni_light_ubo omni_light_ubo = lights.omni_light_ubos[light_idx];
+        if (!omni_light_ubo.on)
+            continue;
+        ++light_count;
+        vec3 frag_norm_bias = frag_norm * omni_light_ubo.normal_bias * 0.001;
+        vec3 biased_frag_pos = in_frag_pos + frag_norm_bias;
         vec3 frag_light_dir = normalize(omni_light_ubo.pos - in_frag_pos);
         float depth_bias = omni_light_ubo.depth_bias * texel_size;
 
         // Light Calculations
         float diffuse = max(dot(frag_norm, frag_light_dir), 0.0);
-        float shadow = calc_shadow(omni_light_ubo, shadow_map_3d[light_idx], depth_bias, vec2(0));
+        float shadow = calc_shadow(omni_light_ubo, shadow_map_3d[light_idx], biased_frag_pos, depth_bias);
         float attenuation = calc_attenuation(omni_light_ubo, distance(in_frag_pos, omni_light_ubo.pos));
-        vec4 omni_light_color = ((omni_light_ubo.ambient * diffuse) + (omni_light_ubo.color * shadow * diffuse)) * attenuation;
+        vec4 omni_light_color = (omni_light_ubo.ambient + (shadow * diffuse)) * omni_light_ubo.color * attenuation;
         light_color += vec3(omni_light_color);
     }
-    out_color = surface_color * vec4(light_color / lights.count, 1);
+    out_color = surface_color * vec4(light_color/*  / light_count */, 1);
 }
 
 // Old

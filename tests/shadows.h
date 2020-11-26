@@ -196,10 +196,13 @@ struct omni_light_ubo {
     struct ctk_v4<f32> color;
     struct ctk_v3<f32> pos;
     s32 depth_bias;
+    s32 normal_bias;
     f32 far_clip;
     f32 linear;
     f32 quadratic;
     f32 ambient;
+    bool on;
+    u32 pad[2];
 };
 
 struct material_ubo {
@@ -999,8 +1002,8 @@ static void create_shadow_maps(struct app *app, struct vk_core *vk) {
         info.view.subresourceRange.layerCount = 6;
 
         info.sampler.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        info.sampler.magFilter = VK_FILTER_LINEAR;
-        info.sampler.minFilter = VK_FILTER_LINEAR;
+        info.sampler.magFilter = VK_FILTER_NEAREST;
+        info.sampler.minFilter = VK_FILTER_NEAREST;
         info.sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
         info.sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
         info.sampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
@@ -1010,7 +1013,7 @@ static void create_shadow_maps(struct app *app, struct vk_core *vk) {
         info.sampler.unnormalizedCoordinates = VK_FALSE;
         info.sampler.compareEnable = VK_FALSE;
         info.sampler.compareOp = VK_COMPARE_OP_NEVER;
-        info.sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        info.sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
         info.sampler.mipLodBias = 0.0f;
         info.sampler.minLod = 0.0f;
         info.sampler.maxLod = 0.0f;
@@ -1153,14 +1156,15 @@ static struct omni_light *push_omni_light(struct scene *scene) {
         CTK_FATAL("cannot push more omni lights to scene (max: %u)", MAX_OMNI_LIGHTS)
     struct omni_light *omni_light = ctk_push(&scene->omni_lights);
     omni_light->transform = ctk_push(&scene->omni_light.transforms, DEFAULT_TRANSFORM);
+    omni_light->near_clip = 0.1f;
+    omni_light->attenuation_index = 3;
     omni_light->model_ubo = ctk_push(&scene->omni_light.model_ubos);
     omni_light->ubo = ctk_push(&scene->omni_light.ubos);
+    omni_light->ubo->on = true;
     omni_light->ubo->color = { 1, 1, 1, 1 };
     // omni_light->ubo->normal_bias = 16;
     omni_light->ubo->ambient = 0.3f;
     omni_light->ubo->far_clip = 50.0f;
-    omni_light->near_clip = 0.1f;
-    omni_light->attenuation_index = 3;
     return omni_light;
 }
 
@@ -1208,26 +1212,34 @@ static struct scene *create_scene(struct app *app, struct vk_core *vk) {
     sibenik->mesh = ctk_at(&app->assets.meshes, "sibenik");
     sibenik->texture_desc_set = ctk_at(&app->descriptors.sets.textures, "brick");
 
+    static s32 const DEPTH_BIAS = 4;
+    static s32 const NORMAL_BIAS = 128;
     struct omni_light *omni_lights[3] = {};
     omni_lights[0] = push_omni_light(scene);
-    omni_lights[0]->transform->position = { 8, -4, 15.5f };
+    omni_lights[0]->transform->position = { 8, -5, 15.5f };
     omni_lights[0]->transform->rotation = { 0.0f, 0.0f, 0.0f };
     omni_lights[0]->transform->scale = { 0.1f, 0.1f, 0.1f };
-    omni_lights[0]->ubo->depth_bias = 1;
+    omni_lights[0]->ubo->depth_bias = DEPTH_BIAS;
+    omni_lights[0]->ubo->normal_bias = NORMAL_BIAS;
+    omni_lights[0]->ubo->far_clip = 20;
     omni_lights[0]->attenuation_index = 3;
 
     omni_lights[1] = push_omni_light(scene);
-    omni_lights[1]->transform->position = { 12, -8, 15.5f };
+    omni_lights[1]->transform->position = { 12, -8, 20.5f };
     omni_lights[1]->transform->rotation = { 0.0f, 0.0f, 0.0f };
     omni_lights[1]->transform->scale = { 0.1f, 0.1f, 0.1f };
-    omni_lights[1]->ubo->depth_bias = 1;
+    omni_lights[1]->ubo->depth_bias = DEPTH_BIAS;
+    omni_lights[1]->ubo->normal_bias = NORMAL_BIAS;
+    omni_lights[1]->ubo->far_clip = 20;
     omni_lights[1]->attenuation_index = 3;
 
     omni_lights[2] = push_omni_light(scene);
-    omni_lights[2]->transform->position = { 12, -8, 20.5f };
+    omni_lights[2]->transform->position = { 12, -8, 15.5f };
     omni_lights[2]->transform->rotation = { 0.0f, 0.0f, 0.0f };
     omni_lights[2]->transform->scale = { 0.1f, 0.1f, 0.1f };
-    omni_lights[2]->ubo->depth_bias = 1;
+    omni_lights[2]->ubo->depth_bias = DEPTH_BIAS;
+    omni_lights[2]->ubo->normal_bias = NORMAL_BIAS;
+    omni_lights[2]->ubo->far_clip = 20;
     omni_lights[2]->attenuation_index = 3;
 
     struct material *mat = push_material(scene, "test");
@@ -1261,9 +1273,9 @@ static void update_lights(struct app *app, struct vk_core *vk, struct scene *sce
 
     for (u32 i = 0; i < scene->omni_lights.count; ++i) {
         struct omni_light *light = scene->omni_lights + i;
-        struct transform *trans = scene->omni_light.transforms + i;
-        struct model_ubo *model_ubo = scene->omni_light.model_ubos + i;
-        struct omni_light_ubo *ubo = scene->omni_light.ubos + i;
+        struct transform *trans = light->transform;
+        struct omni_light_ubo *ubo = light->ubo;
+        struct model_ubo *model_ubo = light->model_ubo;
 
         struct attenuation_consts const *attenuation_consts = LIGHT_ATTENUATION_CONSTS + light->attenuation_index;
         ubo->linear = attenuation_consts->linear;
@@ -1289,41 +1301,6 @@ static void update_lights(struct app *app, struct vk_core *vk, struct scene *sce
         /// Light UBO
         ////////////////////////////////////////////////////////////
         ubo->pos = trans->position;
-        // if (ubo->mode == LIGHT_MODE_DIRECTIONAL) {
-        //     // View Matrix
-        //     glm::mat4 view_mtx(1.0f);
-        //     view_mtx = glm::rotate(view_mtx, glm::radians(trans->rotation.x), { 1.0f, 0.0f, 0.0f });
-        //     view_mtx = glm::rotate(view_mtx, glm::radians(trans->rotation.y), { 0.0f, 1.0f, 0.0f });
-        //     view_mtx = glm::rotate(view_mtx, glm::radians(trans->rotation.z), { 0.0f, 0.0f, 1.0f });
-        //     glm::vec3 light_forward = { view_mtx[0][2], view_mtx[1][2], view_mtx[2][2] };
-        //     view_mtx = glm::lookAt(light_pos, light_pos + light_forward, { 0.0f, -1.0f, 0.0f });
-
-        //     // Projection Matrix
-        //     f32 near_plane = 1.0f;
-        //     f32 far_plane = 60.0f;
-        //     glm::mat4 proj_mtx = glm::ortho(-30.0f, 30.0f, -30.0f, 30.0f, near_plane, far_plane);
-        //     proj_mtx[1][1] *= -1;
-
-        //     ubo->view_mtxs[0] = proj_mtx * view_mtx;
-        //     ubo->direction = { light_forward.x, light_forward.y, light_forward.z };
-        // } else {
-        //     static glm::vec3 const DIRECTIONS[] = {
-        //         { 1, 0, 0 },
-        //         {-1, 0, 0 },
-        //         { 0,-1, 0 },
-        //         { 0, 1, 0 },
-        //         { 0, 0, 1 },
-        //         { 0, 0,-1 },
-        //     };
-        //     glm::mat4 proj_mtx = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 50.0f);
-        //     proj_mtx[1][1] *= -1;
-        //     for (u32 i = 0; i < 6; ++i) {
-        //         glm::vec3 up = i == 2 ? glm::vec3(0, 0, -1) :
-        //                        i == 3 ? glm::vec3(0, 0, 1) :
-        //                        glm::vec3(0, -1, 0);
-        //         ubo->view_mtxs[i] = proj_mtx * glm::lookAt(light_pos, light_pos + DIRECTIONS[i], up);
-        //     }
-        // }
     }
     vtk_write_to_host_region(vk->device.logical, &scene->omni_light.ubos, app->uniform_bufs.omni_light_ubos.element_size,
                              app->uniform_bufs.omni_light_ubos.regions + swapchain_img_idx, 0);
@@ -1591,6 +1568,7 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
         } else if (ui->mode == UI_MODE_LIGHT) {
             struct omni_light *light = scene->omni_lights + ui->light_idx;
             struct omni_light_ubo *ubo = scene->omni_light.ubos + ui->light_idx;
+            ImGui::Checkbox("on", &light->ubo->on);
             transform_control(scene->omni_light.transforms + ui->light_idx);
 
             // static cstr LIGHT_MODE_NAMES[] = { "directional", "point" };
@@ -1598,7 +1576,7 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
             ImGui::InputFloat("near_clip", &light->near_clip);
             ImGui::InputFloat("far_clip", &ubo->far_clip);
             ImGui::InputInt("depth_bias", &ubo->depth_bias);
-            // ImGui::InputInt("normal_bias", &ubo->normal_bias);
+            ImGui::InputInt("normal_bias", &ubo->normal_bias);
             ImGui::SliderInt("attenuation_index", (s32*)&light->attenuation_index, 0, CTK_ARRAY_COUNT(LIGHT_ATTENUATION_CONSTS) - 1);
             ImGui::SliderFloat("ambient", &light->ubo->ambient, 0, 1, "%.2f");
             ImGui::ColorPicker4("##color", &ubo->color.x);
@@ -2051,6 +2029,8 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
 
                 struct mesh *light_diamond = ctk_at(&app->assets.meshes, "light_diamond");
                 for (u32 i = 0; i < scene->omni_lights.count; ++i) {
+                    if (!scene->omni_light.ubos[i].on)
+                        continue;
                     vkCmdPushConstants(cmd_buf, marker_gp->layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct ctk_v3<f32>), &scene->omni_light.ubos[i].color);
                     struct vtk_descriptor_set_binding desc_set_bindings[] = {
                         { &app->descriptors.sets.omni_light_model_ubo, { i }, swapchain_img_idx },
