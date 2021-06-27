@@ -18,10 +18,10 @@
 #include "gfx/imgui/imgui_impl_glfw.h"
 #include "gfx/imgui/imgui_impl_vulkan.h"
 
-#include "ctk/ctk.h"
-#include "ctk/math.h"
-#include "ctk/data.h"
-#include "vtk/vtk.h"
+#include "ctk/old/ctk_1.h"
+#include "ctk/old/math.h"
+#include "ctk/old/data.h"
+#include "vtk/old/vtk_1.h"
 
 ////////////////////////////////////////////////////////////
 /// Constants

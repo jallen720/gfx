@@ -3,7 +3,6 @@
 #define GLFW_INCLUDE_VULKAN
 #include <glfw/glfw3.h>
 
-#define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -20,8 +19,8 @@
 #include "gfx/imgui/imgui_impl_glfw.h"
 #include "gfx/imgui/imgui_impl_vulkan.h"
 
-#include "ctk/ctk_new.h"
-#include "vtk/vtk_new.h"
+#include "ctk/old/ctk_1.h"
+#include "vtk/old/vtk_1.h"
 
 ////////////////////////////////////////////////////////////
 /// Window
@@ -53,21 +52,24 @@ static void mouse_button_callback(GLFWwindow *glfw_win, s32 button, s32 action, 
 }
 
 static struct window *create_window() {
-    auto win = ctk_zalloc<struct window>();
     glfwSetErrorCallback(error_callback);
     if (glfwInit() != GLFW_TRUE)
         CTK_FATAL("failed to init glfw")
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+
+    auto win = ctk_alloc_z<struct window>();
     win->width = 1600;
     win->height = 900;
     win->handle = glfwCreateWindow(win->width, win->height, "test", NULL, NULL);
     if (win->handle == NULL)
         CTK_FATAL("failed to create win")
+
     glfwSetWindowPos(win->handle, 320, 60);
     glfwSetWindowUserPointer(win->handle, win);
     glfwSetKeyCallback(win->handle, key_callback);
     glfwSetMouseButtonCallback(win->handle, mouse_button_callback);
+
     return win;
 }
 
@@ -109,10 +111,11 @@ static void create_buffers(struct vk_core *vk) {
 }
 
 static struct vk_core *create_vk_core(struct window *window) {
-    auto vk = ctk_zalloc<vk_core>();
+    auto vk = ctk_alloc_z<vk_core>();
 
     vk->instance = vtk_create_instance();
-    vtk_validate_result(glfwCreateWindowSurface(vk->instance.handle, window->handle, NULL, &vk->surface), "failed to create glfw surface");
+    vtk_validate_result(glfwCreateWindowSurface(vk->instance.handle, window->handle, NULL, &vk->surface),
+                        "failed to create glfw surface");
 
     VkPhysicalDeviceFeatures features = {};
     features.geometryShader = VK_TRUE;
@@ -125,7 +128,8 @@ static struct vk_core *create_vk_core(struct window *window) {
     cmd_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     cmd_pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     cmd_pool_info.queueFamilyIndex = vk->device.queue_family_indexes.graphics;
-    vtk_validate_result(vkCreateCommandPool(vk->device.logical, &cmd_pool_info, NULL, &vk->graphics_cmd_pool), "failed to create command pool");
+    vtk_validate_result(vkCreateCommandPool(vk->device.logical, &cmd_pool_info, NULL, &vk->graphics_cmd_pool),
+                        "failed to create command pool");
 
     create_buffers(vk);
     vk->staging_region = vtk_allocate_region(&vk->buffers.host, 64 * CTK_MEGABYTE);
@@ -196,10 +200,12 @@ struct omni_light_ubo {
     struct ctk_v4<f32> color;
     struct ctk_v3<f32> pos;
     s32 depth_bias;
+
     s32 normal_bias;
     f32 far_clip;
     f32 linear;
     f32 quadratic;
+
     f32 ambient;
     bool on;
     u32 pad[2];
@@ -297,7 +303,8 @@ static struct vtk_texture load_texture(struct vtk_texture_info *info, cstr path,
     info->view.format = VK_FORMAT_R8G8B8A8_UNORM;
     struct vtk_texture tex = vtk_create_texture(info, &vk->device);
 
-    // Copy image data (now in staging region) to texture image memory, transitioning texture image layout with pipeline barriers as necessary.
+    // Copy image data (now in staging region) to texture image memory, transitioning texture image layout with pipeline
+    // arriers as necessary.
     vtk_begin_one_time_command_buffer(app->cmd_bufs.one_time);
         VkImageMemoryBarrier pre_mem_barrier = {};
         pre_mem_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -335,7 +342,8 @@ static struct vtk_texture load_texture(struct vtk_texture_info *info, cstr path,
         copy.imageExtent.width = width;
         copy.imageExtent.height = height;
         copy.imageExtent.depth = 1;
-        vkCmdCopyBufferToImage(app->cmd_bufs.one_time, vk->staging_region.buffer->handle, tex.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        vkCmdCopyBufferToImage(app->cmd_bufs.one_time, vk->staging_region.buffer->handle, tex.handle,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
 
         VkImageMemoryBarrier post_mem_barrier = {};
         post_mem_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -442,7 +450,8 @@ static void load_assets(struct app *app, struct vk_core *vk) {
     };
     for (u32 i = 0; i < CTK_ARRAY_COUNT(shader_load_infos); ++i) {
         struct shader_load_info *shader_load_info = shader_load_infos + i;
-        ctk_push(&app->assets.shaders, shader_load_info->name, vtk_create_shader(vk->device.logical, shader_load_info->path, shader_load_info->stage));
+        ctk_push(&app->assets.shaders, shader_load_info->name,
+                 vtk_create_shader(vk->device.logical, shader_load_info->path, shader_load_info->stage));
     }
 
     // Textures
@@ -481,23 +490,32 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
         // { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 16 },
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 },
     };
+
     VkDescriptorPoolCreateInfo pool_info = {};
     pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_info.flags = 0;
     pool_info.maxSets = 64;
     pool_info.poolSizeCount = CTK_ARRAY_COUNT(pool_sizes);
     pool_info.pPoolSizes = pool_sizes;
-    vtk_validate_result(vkCreateDescriptorPool(vk->device.logical, &pool_info, NULL, &app->descriptors.pool), "failed to create descriptor pool");
+    vtk_validate_result(vkCreateDescriptorPool(vk->device.logical, &pool_info, NULL, &app->descriptors.pool),
+                        "failed to create descriptor pool");
 
     // Layouts
 
     /* model_ubo */ {
-        VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT };
+        VkDescriptorSetLayoutBinding binding = {
+            0,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+            1,
+            VK_SHADER_STAGE_VERTEX_BIT
+        };
+
         VkDescriptorSetLayoutCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
         info.pBindings = &binding;
-        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptors.set_layouts.model_ubo),
+        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL,
+                                                        &app->descriptors.set_layouts.model_ubo),
                             "error creating descriptor set layout");
     }
 
@@ -507,51 +525,68 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
         info.pBindings = &binding;
-        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptors.set_layouts.omni_light_ubo),
+        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL,
+                                                        &app->descriptors.set_layouts.omni_light_ubo),
                             "error creating descriptor set layout");
     }
 
     /* sampler */ {
-        VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT };
+        VkDescriptorSetLayoutBinding binding = {
+            0,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            1,
+            VK_SHADER_STAGE_FRAGMENT_BIT
+        };
+
         VkDescriptorSetLayoutCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
         info.pBindings = &binding;
-        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptors.set_layouts.sampler),
+        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL,
+                                                        &app->descriptors.set_layouts.sampler),
                             "error creating descriptor set layout");
     }
 
     /* omni_shadow_map_samplers */ {
-        VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_OMNI_LIGHTS, VK_SHADER_STAGE_FRAGMENT_BIT };
+        VkDescriptorSetLayoutBinding binding = {
+            0,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            MAX_OMNI_LIGHTS,
+            VK_SHADER_STAGE_FRAGMENT_BIT
+        };
+
         VkDescriptorSetLayoutCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
         info.pBindings = &binding;
-        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL, &app->descriptors.set_layouts.omni_shadow_map_samplers),
+        vtk_validate_result(vkCreateDescriptorSetLayout(vk->device.logical, &info, NULL,
+                                                        &app->descriptors.set_layouts.omni_shadow_map_samplers),
                             "error creating descriptor set layout");
     }
 
     // Sets
 
     // entity_model_ubo
-    vtk_allocate_descriptor_set(&app->descriptors.sets.entity_model_ubo, app->descriptors.set_layouts.model_ubo, vk->swapchain.image_count, vk->device.logical,
-                                app->descriptors.pool);
+    vtk_allocate_descriptor_set(&app->descriptors.sets.entity_model_ubo, app->descriptors.set_layouts.model_ubo,
+                                vk->swapchain.image_count, vk->device.logical, app->descriptors.pool);
     ctk_push(&app->descriptors.sets.entity_model_ubo.dynamic_offsets, app->uniform_bufs.entity_model_ubos.element_size);
 
     // omni_light_model_ubo
-    vtk_allocate_descriptor_set(&app->descriptors.sets.omni_light_model_ubo, app->descriptors.set_layouts.model_ubo, vk->swapchain.image_count,
-                                vk->device.logical, app->descriptors.pool);
-    ctk_push(&app->descriptors.sets.omni_light_model_ubo.dynamic_offsets, app->uniform_bufs.omni_light_model_ubos.element_size);
+    vtk_allocate_descriptor_set(&app->descriptors.sets.omni_light_model_ubo, app->descriptors.set_layouts.model_ubo,
+                                vk->swapchain.image_count, vk->device.logical, app->descriptors.pool);
+    ctk_push(&app->descriptors.sets.omni_light_model_ubo.dynamic_offsets,
+             app->uniform_bufs.omni_light_model_ubos.element_size);
 
     // omni_light_ubo
-    vtk_allocate_descriptor_set(&app->descriptors.sets.omni_light_ubo, app->descriptors.set_layouts.omni_light_ubo, vk->swapchain.image_count,
-                                vk->device.logical, app->descriptors.pool);
+    vtk_allocate_descriptor_set(&app->descriptors.sets.omni_light_ubo, app->descriptors.set_layouts.omni_light_ubo,
+                                vk->swapchain.image_count, vk->device.logical, app->descriptors.pool);
     // ctk_push(&app->descriptors.sets.omni_light_ubo.dynamic_offsets, app->uniform_bufs.omni_light_ubos.element_size);
 
     // textures
     for (u32 i = 0; i < app->assets.textures.count; ++i) {
         struct vtk_descriptor_set *ds = ctk_push(&app->descriptors.sets.textures, app->assets.textures.keys[i]);
-        vtk_allocate_descriptor_set(ds, app->descriptors.set_layouts.sampler, 1, vk->device.logical, app->descriptors.pool);
+        vtk_allocate_descriptor_set(ds, app->descriptors.set_layouts.sampler, 1, vk->device.logical,
+                                    app->descriptors.pool);
     }
 
     /* omni_shadow_map_samplers */ {
@@ -563,7 +598,8 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
         info.descriptorPool = app->descriptors.pool;
         info.descriptorSetCount = 1;
         info.pSetLayouts = &app->descriptors.set_layouts.omni_shadow_map_samplers;
-        vtk_validate_result(vkAllocateDescriptorSets(vk->device.logical, &info, ds->instances.data + 0), "failed to allocate descriptor sets");
+        vtk_validate_result(vkAllocateDescriptorSets(vk->device.logical, &info, ds->instances.data + 0),
+                            "failed to allocate descriptor sets");
     }
 
     // Updates
@@ -674,7 +710,8 @@ static void create_descriptor_sets(struct app *app, struct vk_core *vk) {
         write->dstArrayElement = 0;
         write->descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         write->descriptorCount = MAX_OMNI_LIGHTS;
-        write->pImageInfo = img_infos + img_infos.count; // point to end of current array, which will be beginning of range of omni shadow map image infos.
+        // Point to end of current array, which will be beginning of range of omni shadow map image infos.
+        write->pImageInfo = img_infos + img_infos.count;
         for (u32 i = 0; i < MAX_OMNI_LIGHTS; ++i) {
             struct vtk_texture *shadow_map = app->shadow_maps.omni + i;
 
@@ -706,7 +743,7 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
 
         // Subpass Infos
         struct vtk_subpass_info *main = ctk_push(&rp_info.subpass_infos);
-        ctk_set(&main->depth_attachment_ref, { 0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
+        ctk_set(&main->depth_attachment_ref, { 0,  VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL });
 
         // Subpass Dependencies
         rp_info.subpass_dependencies.count = 1;
@@ -716,7 +753,8 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
         rp_info.subpass_dependencies[0].dstSubpass = VK_SUBPASS_EXTERNAL;
         rp_info.subpass_dependencies[0].srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
         rp_info.subpass_dependencies[0].dstStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        rp_info.subpass_dependencies[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT ;
+        rp_info.subpass_dependencies[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                                                        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         rp_info.subpass_dependencies[0].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
         rp_info.subpass_dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
@@ -770,7 +808,8 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
         // rp_info.subpass_dependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
         // rp_info.subpass_dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         // rp_info.subpass_dependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-        // rp_info.subpass_dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        // rp_info.subpass_dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+        //                                                 VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         // rp_info.subpass_dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
         // Framebuffer Infos
@@ -815,7 +854,8 @@ static void create_render_passes(struct app *app, struct vk_core *vk) {
             fb_info->layers = 1;
         }
 
-        app->render_passes.fullscreen_texture = vtk_create_render_pass(vk->device.logical, vk->graphics_cmd_pool, &rp_info);
+        app->render_passes.fullscreen_texture = vtk_create_render_pass(vk->device.logical, vk->graphics_cmd_pool,
+                                                                       &rp_info);
     }
 }
 
@@ -834,7 +874,8 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         info.depth_stencil_state.depthTestEnable = VK_TRUE;
         info.depth_stencil_state.depthWriteEnable = VK_TRUE;
         info.depth_stencil_state.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-        app->graphics_pipelines.perspective_shadow = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.shadow, 0, &info);
+        app->graphics_pipelines.perspective_shadow =
+            vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.shadow, 0, &info);
     }
 
     /* Direct */ {
@@ -856,7 +897,8 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         info.depth_stencil_state.depthTestEnable = VK_TRUE;
         info.depth_stencil_state.depthWriteEnable = VK_TRUE;
         info.depth_stencil_state.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-        app->graphics_pipelines.direct = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.direct, 0, &info);
+        app->graphics_pipelines.direct = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.direct, 0,
+                                                                      &info);
     }
 
     /* Marker */ {
@@ -873,7 +915,8 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         info.depth_stencil_state.depthTestEnable = VK_TRUE;
         info.depth_stencil_state.depthWriteEnable = VK_TRUE;
         info.depth_stencil_state.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-        app->graphics_pipelines.marker = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.direct, 0, &info);
+        app->graphics_pipelines.marker = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.direct, 0,
+                                                                      &info);
     }
 
     /* Fullscreen Texture */ {
@@ -888,7 +931,9 @@ static void create_graphics_pipelines(struct app *app, struct vk_core *vk) {
         ctk_push(&info.viewports, { 1600 - (SIZE + 10), 10, SIZE, SIZE, 0, 1 });
         ctk_push(&info.scissors, { 1600 - (SIZE + 10), 10, SIZE, SIZE });
         ctk_push(&info.color_blend_attachment_states, vtk_default_color_blend_attachment_state());
-        app->graphics_pipelines.fullscreen_texture = vtk_create_graphics_pipeline(vk->device.logical, &app->render_passes.fullscreen_texture, 0, &info);
+        app->graphics_pipelines.fullscreen_texture = vtk_create_graphics_pipeline(vk->device.logical,
+                                                                                  &app->render_passes.fullscreen_texture,
+                                                                                  0, &info);
     }
 }
 
@@ -910,9 +955,17 @@ static void init_frame_sync(struct app *app, struct vk_core *vk) {
     fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
     for (u32 i = 0; i < app->frame_sync.frame_count; ++i) {
-        vtk_validate_result(vkCreateSemaphore(vk->device.logical, &semaphore_info, NULL, app->frame_sync.img_aquired + i), "failed to create semaphore");
-        vtk_validate_result(vkCreateSemaphore(vk->device.logical, &semaphore_info, NULL, app->frame_sync.render_finished + i), "failed to create semaphore");
-        vtk_validate_result(vkCreateFence(vk->device.logical, &fence_info, NULL, app->frame_sync.in_flight + i), "failed to create fence");
+        vtk_validate_result(
+            vkCreateSemaphore(vk->device.logical, &semaphore_info, NULL, app->frame_sync.img_aquired + i),
+            "failed to create semaphore");
+
+        vtk_validate_result(
+            vkCreateSemaphore(vk->device.logical, &semaphore_info, NULL, app->frame_sync.render_finished + i),
+            "failed to create semaphore");
+
+        vtk_validate_result(
+            vkCreateFence(vk->device.logical, &fence_info, NULL, app->frame_sync.in_flight + i),
+            "failed to create fence");
     }
 
     for (u32 i = 0; i < vk->swapchain.image_count; ++i)
@@ -956,7 +1009,9 @@ static void create_shadow_maps(struct app *app, struct vk_core *vk) {
     //     info.image.extent.height = SHADOW_MAP_SIZE;
     //     info.image.format = VK_FORMAT_D32_SFLOAT;
     //     info.image.tiling = VK_IMAGE_TILING_OPTIMAL;
-    //     info.image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    //     info.image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+    //                        VK_IMAGE_USAGE_SAMPLED_BIT |
+    //                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     //     info.view.format = VK_FORMAT_D32_SFLOAT;
     //     info.view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
     //     info.sampler.magFilter = VK_FILTER_NEAREST;
@@ -1051,7 +1106,7 @@ static void create_shadow_maps(struct app *app, struct vk_core *vk) {
 }
 
 static struct app *create_app(struct vk_core *vk) {
-    auto app = ctk_zalloc<struct app>();
+    auto app = ctk_alloc_z<struct app>();
 
     // Vertex Layout
     vtk_push_vertex_attribute(&app->vertex_layout, "position", 3);
@@ -1059,19 +1114,22 @@ static struct app *create_app(struct vk_core *vk) {
     vtk_push_vertex_attribute(&app->vertex_layout, "uv", 2);
 
     // Uniform Buffers
-    app->uniform_bufs.entity_model_ubos = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_ENTITIES, sizeof(struct model_ubo),
-                                                                    vk->swapchain.image_count);
-    app->uniform_bufs.omni_light_model_ubos = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_OMNI_LIGHTS, sizeof(struct model_ubo),
+    app->uniform_bufs.entity_model_ubos = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_ENTITIES,
+                                                                    sizeof(struct model_ubo), vk->swapchain.image_count);
+    app->uniform_bufs.omni_light_model_ubos = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, MAX_OMNI_LIGHTS,
+                                                                        sizeof(struct model_ubo),
                                                                         vk->swapchain.image_count);
+    u32 omni_lights_ubo_size = (sizeof(struct omni_light_ubo) * MAX_OMNI_LIGHTS) + sizeof(u32) +
+                               ARRAY_UNIFORM_BUF_PADDING;
     app->uniform_bufs.omni_light_ubos = vtk_create_uniform_buffer(&vk->buffers.host, &vk->device, 1,
-                                                                  (sizeof(struct omni_light_ubo) * MAX_OMNI_LIGHTS) + sizeof(u32) + ARRAY_UNIFORM_BUF_PADDING,
-                                                                  vk->swapchain.image_count);
+                                                                  omni_lights_ubo_size, vk->swapchain.image_count);
 
     // Command Buffers
-    app->cmd_bufs.one_time = vtk_allocate_command_buffer(vk->device.logical, vk->graphics_cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    app->cmd_bufs.one_time = vtk_allocate_command_buffer(vk->device.logical, vk->graphics_cmd_pool,
+                                                         VK_COMMAND_BUFFER_LEVEL_PRIMARY);
     app->cmd_bufs.render.count = vk->swapchain.image_count;
-    vtk_allocate_command_buffers(vk->device.logical, vk->graphics_cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, app->cmd_bufs.render.count,
-                                 app->cmd_bufs.render.data);
+    vtk_allocate_command_buffers(vk->device.logical, vk->graphics_cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                                 app->cmd_bufs.render.count, app->cmd_bufs.render.data);
 
     create_attachment_images(app, vk);
     create_shadow_maps(app, vk);
@@ -1179,7 +1237,7 @@ static struct material *push_material(struct scene *scene, cstr name = NULL) {
 }
 
 static struct scene *create_scene(struct app *app, struct vk_core *vk) {
-    auto scene = ctk_zalloc<struct scene>();
+    auto scene = ctk_alloc_z<struct scene>();
 
     scene->camera.transform = DEFAULT_TRANSFORM;
     scene->camera.transform.position = { 10, -5, 14};
@@ -1267,7 +1325,8 @@ static glm::mat4 camera_view_space_mtx(struct camera *cam) {
     return proj_mtx * view_mtx;
 }
 
-static void update_lights(struct app *app, struct vk_core *vk, struct scene *scene, glm::mat4 *view_space_mtx, u32 swapchain_img_idx) {
+static void update_lights(struct app *app, struct vk_core *vk, struct scene *scene, glm::mat4 *view_space_mtx,
+                          u32 swapchain_img_idx) {
     if (scene->omni_lights.count == 0)
         return;
 
@@ -1304,11 +1363,13 @@ static void update_lights(struct app *app, struct vk_core *vk, struct scene *sce
     }
     vtk_write_to_host_region(vk->device.logical, &scene->omni_light.ubos, app->uniform_bufs.omni_light_ubos.element_size,
                              app->uniform_bufs.omni_light_ubos.regions + swapchain_img_idx, 0);
-    vtk_write_to_host_region(vk->device.logical, scene->omni_light.model_ubos.data, ctk_byte_count(&scene->omni_light.model_ubos),
+    vtk_write_to_host_region(vk->device.logical, scene->omni_light.model_ubos.data,
+                             ctk_byte_count(&scene->omni_light.model_ubos),
                              app->uniform_bufs.omni_light_model_ubos.regions + swapchain_img_idx, 0);
 }
 
-static void update_entities(struct app *app, struct vk_core *vk, struct scene *scene, glm::mat4 *view_space_mtx, u32 swapchain_img_idx) {
+static void update_entities(struct app *app, struct vk_core *vk, struct scene *scene, glm::mat4 *view_space_mtx,
+                            u32 swapchain_img_idx) {
     if (scene->entities.count == 0)
         return;
 
@@ -1353,7 +1414,7 @@ static void check_vk_result(VkResult result) {
 }
 
 static struct ui *create_ui(struct window *win, struct app *app, struct vk_core *vk) {
-    auto ui = ctk_zalloc<struct ui>();
+    auto ui = ctk_alloc_z<struct ui>();
     ui->mode = UI_MODE_LIGHT;
 
     ////////////////////////////////////////////////////////////
@@ -1392,7 +1453,8 @@ static struct ui *create_ui(struct window *win, struct app *app, struct vk_core 
     rp_info.subpass_dependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     rp_info.subpass_dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     rp_info.subpass_dependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-    rp_info.subpass_dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    rp_info.subpass_dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                                                    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     rp_info.subpass_dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
     // Framebuffer Infos
@@ -1420,7 +1482,8 @@ static struct ui *create_ui(struct window *win, struct app *app, struct vk_core 
     pool_info.maxSets = 64;
     pool_info.poolSizeCount = CTK_ARRAY_COUNT(pool_sizes);
     pool_info.pPoolSizes = pool_sizes;
-    vtk_validate_result(vkCreateDescriptorPool(vk->device.logical, &pool_info, NULL, &ui->descriptor_pool), "failed to create descriptor pool");
+    vtk_validate_result(vkCreateDescriptorPool(vk->device.logical, &pool_info, NULL, &ui->descriptor_pool),
+                        "failed to create descriptor pool");
 
     ////////////////////////////////////////////////////////////
     /// Vulkan Init
@@ -1492,15 +1555,18 @@ static void transform_control(struct transform *t) {
 
 static void enum_dropdown(cstr id, cstr *elems, u32 elem_count, s32 *enum_val) {
     cstr curr_elem = elems[*enum_val];
-    ImGui::PushItemWidth(-1);
     char imgui_id[256] = {};
     sprintf(imgui_id, "##%s", id);
+
+    ImGui::PushItemWidth(-1);
     if (ImGui::BeginCombo(imgui_id, curr_elem)) {
         for (u32 i = 0; i < elem_count; ++i) {
             cstr elem = elems[i];
             bool selected = curr_elem == elem;
+
             if (ImGui::Selectable(elem, selected))
                 *enum_val = i;
+
             if (selected)
                 ImGui::SetItemDefaultFocus();
         }
@@ -1526,16 +1592,19 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
                 for (u32 i = 0; i < scene->entities.count; ++i) {
                     cstr entity_name = scene->entities[i].name;
                     char name[64] = {};
+
                     if (entity_name != NULL)
                         strcpy(name, entity_name);
                     else
                         sprintf(name, "entity %u", i);
+
                     if (ImGui::Selectable(name, i == ui->entity_idx))
                         ui->entity_idx = i;
                 }
             }
             list_box_end();
-        } else if (ui->mode == UI_MODE_LIGHT) {
+        }
+        else if (ui->mode == UI_MODE_LIGHT) {
             if (list_box_begin("1", NULL, scene->omni_lights.count)) {
                 for (u32 i = 0; i < scene->omni_lights.count; ++i) {
                     char name[16] = {};
@@ -1545,15 +1614,18 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
                 }
             }
             list_box_end();
-        } else if (ui->mode == UI_MODE_MATERIAL) {
+        }
+        else if (ui->mode == UI_MODE_MATERIAL) {
             if (list_box_begin("2", NULL, scene->materials.count)) {
                 for (u32 i = 0; i < scene->materials.count; ++i) {
                     cstr mat_name = scene->materials[i].name;
                     char name[64] = {};
+
                     if (mat_name != NULL)
                         strcpy(name, mat_name);
                     else
                         sprintf(name, "material %u", i);
+
                     if (ImGui::Selectable(name, i == ui->material_idx))
                         ui->material_idx = i;
                 }
@@ -1565,7 +1637,8 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
         if (ui->mode == UI_MODE_ENTITY) {
             struct entity *entity = scene->entities + ui->entity_idx;
             transform_control(entity->transform);
-        } else if (ui->mode == UI_MODE_LIGHT) {
+        }
+        else if (ui->mode == UI_MODE_LIGHT) {
             struct omni_light *light = scene->omni_lights + ui->light_idx;
             struct omni_light_ubo *ubo = scene->omni_light.ubos + ui->light_idx;
             ImGui::Checkbox("on", &light->ubo->on);
@@ -1577,10 +1650,12 @@ static void draw_ui(struct ui *ui, struct scene *scene, struct window *win) {
             ImGui::InputFloat("far_clip", &ubo->far_clip);
             ImGui::InputInt("depth_bias", &ubo->depth_bias);
             ImGui::InputInt("normal_bias", &ubo->normal_bias);
-            ImGui::SliderInt("attenuation_index", (s32*)&light->attenuation_index, 0, CTK_ARRAY_COUNT(LIGHT_ATTENUATION_CONSTS) - 1);
+            ImGui::SliderInt("attenuation_index", (s32*)&light->attenuation_index, 0,
+                             CTK_ARRAY_COUNT(LIGHT_ATTENUATION_CONSTS) - 1);
             ImGui::SliderFloat("ambient", &light->ubo->ambient, 0, 1, "%.2f");
             ImGui::ColorPicker4("##color", &ubo->color.x);
-        } else if (ui->mode == UI_MODE_MATERIAL) {
+        }
+        else if (ui->mode == UI_MODE_MATERIAL) {
             struct material *mat = scene->materials + ui->material_idx;
             ImGui::SliderInt("shine_exponent", (s32 *)&mat->ubo->shine_exponent, 1, 256);
         }
@@ -1662,7 +1737,8 @@ static void camera_controls(struct transform *cam_trans, struct window *window) 
 static u32 vtk_aquire_swapchain_image_index(struct app *app, struct vk_core *vk) {
     u32 swapchain_img_idx = CTK_U32_MAX;
     VkSemaphore img_aquired_semaphore = app->frame_sync.img_aquired[app->frame_sync.curr_frame];
-    vtk_validate_result(vkAcquireNextImageKHR(vk->device.logical, vk->swapchain.handle, CTK_U64_MAX, img_aquired_semaphore, VK_NULL_HANDLE, &swapchain_img_idx),
+    vtk_validate_result(vkAcquireNextImageKHR(vk->device.logical, vk->swapchain.handle, CTK_U64_MAX,
+                                              img_aquired_semaphore, VK_NULL_HANDLE, &swapchain_img_idx),
                         "failed to aquire next swapchain image");
     return swapchain_img_idx;
 }
@@ -1675,8 +1751,8 @@ static void sync_frame(struct app *app, struct vk_core *vk, u32 swapchain_img_id
     *img_prev_frame = app->frame_sync.curr_frame;
 }
 
-// static void render_omni_shadow_map_direction(struct app *app, struct vk_core *vk, struct scene *scene, u32 swapchain_img_idx, VkCommandBuffer cmd_buf,
-//                                              u32 direction_view_mtx_idx) {
+// static void render_omni_shadow_map_direction(struct app *app, struct vk_core *vk, struct scene *scene,
+//                                              u32 swapchain_img_idx, VkCommandBuffer cmd_buf, u32 direction_view_mtx_idx) {
 //     struct vtk_render_pass *rp = &app->render_passes.shadow;
 
 //     VkRect2D render_area = {};
@@ -2031,7 +2107,7 @@ static void record_render_passes(struct app *app, struct vk_core *vk, struct sce
                 for (u32 i = 0; i < scene->omni_lights.count; ++i) {
                     if (!scene->omni_light.ubos[i].on)
                         continue;
-                    vkCmdPushConstants(cmd_buf, marker_gp->layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct ctk_v3<f32>), &scene->omni_light.ubos[i].color);
+                    vkCmdPushConstants(cmd_buf, marker_gp->layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct ctk_v4<f32>), &scene->omni_light.ubos[i].color);
                     struct vtk_descriptor_set_binding desc_set_bindings[] = {
                         { &app->descriptors.sets.omni_light_model_ubo, { i }, swapchain_img_idx },
                     };

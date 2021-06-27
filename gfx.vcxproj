@@ -78,13 +78,13 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>C:\Users\joela\dev\libs;C:\Users\joela\dev\libs\assimp-5.0.1\include;C:\Users\joela\dev\libs\glm;C:\Users\joela\dev\libs\VulkanSDK\1.1.130.0\Include;C:\Users\joela\dev\libs\glfw-3.3.1\include;C:\Users\joela\dev\projects;$(IncludePath)</IncludePath>
-    <LibraryPath>C:\Users\joela\dev\libs\assimp-5.0.1\lib\Debug;C:\Users\joela\dev\libs\VulkanSDK\1.1.130.0\Lib;C:\Users\joela\dev\libs\glfw-3.3.1\lib-vc2019;$(LibraryPath)</LibraryPath>
+    <IncludePath>C:\Users\joela\dev\lib;C:\Users\joela\dev\lib\assimp-5.0.1\include;C:\Users\joela\dev\lib\glm;C:\Users\joela\dev\lib\VulkanSDK\1.2.162.1\Include;C:\Users\joela\dev\lib\glfw-3.3.1\include;C:\Users\joela\dev\pro;$(IncludePath)</IncludePath>
+    <LibraryPath>C:\Users\joela\dev\lib\assimp-5.0.1\lib\Debug;C:\Users\joela\dev\lib\VulkanSDK\1.2.162.1\Lib;C:\Users\joela\dev\lib\glfw-3.3.1\lib-vc2019;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>C:\Users\joela\dev\libs;C:\Users\joela\dev\libs\assimp-5.0.1\include;C:\Users\joela\dev\libs\glm;C:\Users\joela\dev\libs\VulkanSDK\1.1.130.0\Include;C:\Users\joela\dev\libs\glfw-3.3.1\include;C:\Users\joela\dev\projects;$(IncludePath)</IncludePath>
-    <LibraryPath>C:\Users\joela\dev\libs\assimp-5.0.1\lib\Debug;C:\Users\joela\dev\libs\VulkanSDK\1.1.130.0\Lib;C:\Users\joela\dev\libs\glfw-3.3.1\lib-vc2019;$(LibraryPath)</LibraryPath>
+    <IncludePath>C:\Users\joela\dev\lib;C:\Users\joela\dev\lib\assimp-5.0.1\include;C:\Users\joela\dev\lib\glm;C:\Users\joela\dev\lib\VulkanSDK\1.2.162.1\Include;C:\Users\joela\dev\lib\glfw-3.3.1\include;C:\Users\joela\dev\pro;$(IncludePath)</IncludePath>
+    <LibraryPath>C:\Users\joela\dev\lib\assimp-5.0.1\lib\Debug;C:\Users\joela\dev\lib\VulkanSDK\1.2.162.1\Lib;C:\Users\joela\dev\lib\glfw-3.3.1\lib-vc2019;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -168,6 +168,7 @@
     <ClInclude Include="tests\depth_peeling.h" />
     <ClInclude Include="tests\input_attachments.h" />
     <ClInclude Include="tests\lighting.h" />
+    <ClInclude Include="tests\shadows.h" />
     <ClInclude Include="tests\shared.h" />
     <ClInclude Include="tests\stencil.h" />
   </ItemGroup>

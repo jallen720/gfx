@@ -4,7 +4,7 @@ const { exec } = require("child_process");
 const { homedir } = require("os");
 
 const SHADER_DIRECTORY = join(__dirname, "assets", "shaders");
-const GLSLC = join(homedir(), "dev", "libs", "VulkanSDK", "1.1.130.0", "Bin32", "glslc.exe");
+const GLSLC = join(homedir(), "dev", "lib", "VulkanSDK", "1.2.162.1", "Bin32", "glslc.exe");
 
 function get_dir_ents(dir) {
     let dir_ents = readdirSync(dir, { withFileTypes: true });
